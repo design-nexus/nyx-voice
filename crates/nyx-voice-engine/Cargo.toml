@@ -1,0 +1,28 @@
+[package]
+name = "nyx-voice-engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Nyx Voice's speech engine: PipeWire capture and playback, echo cancelling, voice activity (Silero), streaming recognition (sherpa-onnx worker) and synthesis (Kokoro, optional Chatterbox)"
+
+[features]
+default = ["cuda"]
+# Kokoro on the GPU where ONNX Runtime has kernels for it.
+cuda = ["loqui/cuda"]
+
+[dependencies]
+anyhow.workspace = true
+nyx-voice-proto.workspace = true
+dirs.workspace = true
+hound.workspace = true
+libc.workspace = true
+loqui = { version = "0.3.0" }
+ort.workspace = true
+pipewire = "0.9"
+serde.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true

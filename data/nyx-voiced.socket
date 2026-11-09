@@ -1,0 +1,11 @@
+[Unit]
+Description=Nyx Voice socket (starts Nyx Voice on first use)
+Documentation=https://github.com/design-nexus/nyx-voice
+
+[Socket]
+ListenStream=%t/nyx-voice/voice.sock
+SocketMode=0600
+DirectoryMode=0700
+
+[Install]
+WantedBy=sockets.target

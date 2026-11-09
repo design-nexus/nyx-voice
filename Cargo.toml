@@ -1,0 +1,45 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/nyx-voice-engine",
+    "crates/nyx-voice-proto",
+    "crates/nyx-voice-client",
+    "apps/nyx-voice-asr",
+    "apps/nyx-voiced",
+    "apps/nyx-voice",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/design-nexus/nyx-voice"
+authors = ["Ken Smith <ken@kensmith.dev>"]
+
+[workspace.dependencies]
+anyhow = "1"
+dirs = "6"
+hound = "3"
+libc = "0.2"
+nyx-voice-engine = { path = "crates/nyx-voice-engine" }
+nyx-voice-proto = { path = "crates/nyx-voice-proto" }
+nyx-voice-client = { path = "crates/nyx-voice-client" }
+ort = { version = "=2.0.0-rc.13", default-features = false, features = [
+    "std",
+    "download-binaries",
+    "tls-rustls",
+    "api-22",
+] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tempfile = "3"
+thiserror = "2"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "io-util", "sync", "time", "process", "signal", "fs"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+toml = "0.8"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[profile.release]
+lto = "thin"
+strip = true

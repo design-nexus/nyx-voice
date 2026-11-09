@@ -1,0 +1,10 @@
+[package]
+name = "nyx-voice-proto"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Nyx Voice's wire types: the nyx-voiced socket protocol and the speech recognizer worker's frames"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
