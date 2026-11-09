@@ -11,7 +11,8 @@
 //! barge-in and duplex listening keep their latency. Call [`paths::set_app`] first.
 
 pub mod asr;
-pub mod config;
+/// The speech settings (`[audio]`, `[vad]`, `[stt]`, `[tts]`, `[barge_in]`).
+pub use nyx_voice_proto::settings as config;
 pub mod paths;
 pub mod speech_text;
 pub mod tts;
