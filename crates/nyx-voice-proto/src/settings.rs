@@ -87,6 +87,10 @@ pub struct VadCfg {
     pub model: String,
     #[serde(default = "default_silero_url")]
     pub url: String,
+    /// The model's SHA-256; a download that doesn't match is refused. Empty skips the
+    /// check (for a `url` of your own).
+    #[serde(default = "default_silero_sha256")]
+    pub sha256: String,
 }
 
 fn default_vad_confirm() -> u32 {
@@ -104,13 +108,23 @@ impl Default for VadCfg {
             start_confirm_frames: 2,
             model: String::new(),
             url: default_silero_url(),
+            sha256: default_silero_sha256(),
         }
     }
 }
 
+/// Silero VAD v6.2.3, at its commit (a branch or tag could change under it).
 pub fn default_silero_url() -> String {
-    "https://github.com/snakers4/silero-vad/raw/master/src/silero_vad/data/silero_vad.onnx".into()
+    "https://raw.githubusercontent.com/snakers4/silero-vad/5cd7945676eb32225748052e2e6a0580e4686a08/src/silero_vad/data/silero_vad.onnx".into()
 }
+
+pub fn default_silero_sha256() -> String {
+    "1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3".into()
+}
+
+/// The address older settings saved, from the moving `master` branch: the pinned one
+/// stands in for it.
+pub const OLD_SILERO_URL: &str = "https://github.com/snakers4/silero-vad/raw/master/src/silero_vad/data/silero_vad.onnx";
 
 impl VadCfg {
     pub fn wants_silero(&self) -> bool {

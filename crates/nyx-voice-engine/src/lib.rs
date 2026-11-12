@@ -16,6 +16,7 @@ pub use nyx_voice_proto::settings as config;
 pub mod paths;
 pub mod speech_text;
 pub mod tts;
+mod checksum;
 mod engine;
 mod duck;
 mod playq;

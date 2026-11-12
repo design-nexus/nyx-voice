@@ -53,7 +53,7 @@ pub struct Silero {
 impl Silero {
     pub fn load(cfg: &VadCfg) -> Result<Self> {
         let path = model_path(cfg);
-        ensure_model(&path, &cfg.url)?;
+        ensure_model(&path, cfg)?;
         let session = Session::builder()
             .map_err(|e| anyhow::anyhow!("silero session builder: {e}"))?
             .with_intra_threads(1)
@@ -193,9 +193,17 @@ pub fn model_path(cfg: &VadCfg) -> PathBuf {
     }
 }
 
-fn ensure_model(path: &Path, url: &str) -> Result<()> {
+fn ensure_model(path: &Path, cfg: &VadCfg) -> Result<()> {
+    let url = if cfg.url == nyx_voice_proto::settings::OLD_SILERO_URL { nyx_voice_proto::settings::default_silero_url() } else { cfg.url.clone() };
+    let url = url.as_str();
+    let want = cfg.sha256.trim();
     if path.exists() {
-        return Ok(());
+        // A model fetched before the check, or by another program: verified once more.
+        if want.is_empty() || !cfg.model.trim().is_empty() || crate::checksum::sha256_file(path)? == want {
+            return Ok(());
+        }
+        tracing::warn!(path = %path.display(), "the silero model doesn't match its checksum; fetching it again");
+        std::fs::remove_file(path)?;
     }
     if url.trim().is_empty() {
         anyhow::bail!(
@@ -217,6 +225,13 @@ fn ensure_model(path: &Path, url: &str) -> Result<()> {
     if !status.success() {
         let _ = std::fs::remove_file(&tmp);
         anyhow::bail!("curl silero vad failed: {status}");
+    }
+    if !want.is_empty() {
+        let got = crate::checksum::sha256_file(&tmp)?;
+        if got != want {
+            let _ = std::fs::remove_file(&tmp);
+            anyhow::bail!("the downloaded silero model doesn't match its checksum (got {got}, expected {want})");
+        }
     }
     std::fs::rename(&tmp, path).context("install silero vad")?;
     Ok(())
@@ -241,5 +256,20 @@ mod tests {
         let quiet = vec![0i16; 512];
         let p = silero.infer(&quiet, &mut state).expect("infer");
         assert!(p < 0.5, "silence prob {p}");
+    }
+
+    #[test]
+    fn a_tampered_download_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let fake = dir.path().join("fake.onnx");
+        std::fs::write(&fake, "not the model").unwrap();
+        let cfg = VadCfg { url: format!("file://{}", fake.display()), ..Default::default() };
+        let target = dir.path().join("cache/silero_vad.onnx");
+        let err = ensure_model(&target, &cfg).unwrap_err().to_string();
+        assert!(err.contains("checksum"), "{err}");
+        assert!(!target.exists());
+        let open = VadCfg { sha256: String::new(), ..cfg };
+        ensure_model(&target, &open).unwrap();
+        assert!(target.exists());
     }
 }

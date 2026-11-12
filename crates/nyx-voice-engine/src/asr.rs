@@ -315,7 +315,7 @@ pub fn installed_model() -> Option<PathBuf> {
 /// through a temporary folder so an interrupted download never looks installed. Only on
 /// request: nothing downloads it by itself.
 pub fn fetch_model() -> Result<PathBuf> {
-    use nyx_voice_proto::asr::{ENCODER, MODEL_NAME, MODEL_URL};
+    use nyx_voice_proto::asr::{ENCODER, MODEL_NAME, MODEL_SHA256, MODEL_URL};
     if let Some(found) = installed_model() {
         return Ok(found);
     }
@@ -326,8 +326,17 @@ pub fn fetch_model() -> Result<PathBuf> {
     let archive = tmp.path().join("model.tar.bz2");
     let ok = std::process::Command::new("curl").args(["-fL", "--progress-bar", "-o"]).arg(&archive).arg(MODEL_URL).status()?.success();
     anyhow::ensure!(ok, "the download failed");
-    let ok = std::process::Command::new("tar").arg("xjf").arg(&archive).arg("-C").arg(tmp.path()).status()?.success();
+    let got = crate::checksum::sha256_file(&archive)?;
+    anyhow::ensure!(got == MODEL_SHA256, "the downloaded model doesn't match its checksum (got {got}, expected {MODEL_SHA256})");
+    let ok = std::process::Command::new("tar")
+        .args(["--no-same-owner", "--no-same-permissions", "-xjf"])
+        .arg(&archive)
+        .arg("-C")
+        .arg(tmp.path())
+        .status()?
+        .success();
     anyhow::ensure!(ok, "the archive could not be unpacked");
+    crate::checksum::only_plain_files(tmp.path())?;
     let unpacked = tmp.path().join(MODEL_NAME);
     anyhow::ensure!(unpacked.join(ENCODER).is_file(), "the archive doesn't hold {MODEL_NAME}");
     let _ = std::fs::remove_dir_all(unpacked.join("test_wavs"));

@@ -26,6 +26,8 @@ pub const TOKENS: &str = "tokens.txt";
 /// The model `nyx-voice models fetch asr` installs, and where it comes from.
 pub const MODEL_NAME: &str = "sherpa-onnx-nemotron-speech-streaming-en-0.6b-560ms-int8-2026-04-25";
 pub const MODEL_URL: &str = "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemotron-speech-streaming-en-0.6b-560ms-int8-2026-04-25.tar.bz2";
+/// `MODEL_URL`'s SHA-256 (GitHub's digest for the release asset).
+pub const MODEL_SHA256: &str = "78e2b79fcf7271553a74402a76b771b09ea40117a39566a79f52235b23db6358";
 /// Frames larger than this are refused (60 s of audio), so a bad length can't exhaust memory.
 const MAX_SAMPLES: u32 = SAMPLE_RATE * 60;
 
