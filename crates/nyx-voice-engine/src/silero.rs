@@ -260,6 +260,10 @@ mod tests {
 
     #[test]
     fn a_tampered_download_is_refused() {
+        // The download goes through curl, which a build sandbox may not have.
+        if Command::new("curl").arg("--version").output().is_err() {
+            return;
+        }
         let dir = tempfile::tempdir().unwrap();
         let fake = dir.path().join("fake.onnx");
         std::fs::write(&fake, "not the model").unwrap();
