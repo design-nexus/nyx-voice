@@ -39,16 +39,42 @@ async fn run() -> Result<()> {
                 "toggle" => DictateAction::Toggle,
                 _ => bail!("dictate start|stop|toggle"),
             };
-            if let Some(text) = voice.dictate(action).await? {
+            let result = voice.dictate(action).await;
+            // From a key binding nobody sees stderr: say why in a notification.
+            if let Err(e) = &result {
+                if !std::io::IsTerminal::is_terminal(&std::io::stderr())
+                    && action != DictateAction::Stop
+                {
+                    let _ = std::process::Command::new("notify-send")
+                        .args([
+                            "--app-name=Nyx Voice",
+                            "--icon=audio-input-microphone-symbolic",
+                            "Dictation didn't start",
+                        ])
+                        .arg(dictation_problem(&format!("{e:#}")))
+                        .status();
+                }
+            }
+            if let Some(text) = result? {
                 if !text.is_empty() {
                     println!("{text}");
                 }
             }
         }
         ["listen", flags @ ..] => {
-            let mode = if flags.contains(&"--assistant") { Mode::Assistant } else { Mode::Dictation };
-            let until = if flags.contains(&"--hold") { Until::Stop } else { Until::Silence };
-            let mut s = voice.listen(mode, until, flags.contains(&"--partials")).await?;
+            let mode = if flags.contains(&"--assistant") {
+                Mode::Assistant
+            } else {
+                Mode::Dictation
+            };
+            let until = if flags.contains(&"--hold") {
+                Until::Stop
+            } else {
+                Until::Silence
+            };
+            let mut s = voice
+                .listen(mode, until, flags.contains(&"--partials"))
+                .await?;
             while let Some(item) = s.next().await {
                 match item? {
                     Item::Event(Event::Partial { text }) => eprintln!("… {text}"),
@@ -65,7 +91,13 @@ async fn run() -> Result<()> {
             if rest.contains(&"--json") {
                 println!("{}", serde_json::to_string(&s)?);
             } else {
-                println!("{}{}", s.activity, s.mode.map(|m| format!(" ({m:?})").to_lowercase()).unwrap_or_default());
+                println!(
+                    "{}{}",
+                    s.activity,
+                    s.mode
+                        .map(|m| format!(" ({m:?})").to_lowercase())
+                        .unwrap_or_default()
+                );
                 if let Some(why) = s.recognizer_unavailable {
                     println!("speech recognition: {why}");
                 }
@@ -87,7 +119,12 @@ async fn run() -> Result<()> {
                 for (title, list) in [("Microphones", inputs), ("Outputs", outputs)] {
                     println!("{title}:");
                     for d in list {
-                        println!("  {} {}  ({})", if d.default { "*" } else { " " }, d.name, d.id);
+                        println!(
+                            "  {} {}  ({})",
+                            if d.default { "*" } else { " " },
+                            d.name,
+                            d.id
+                        );
                     }
                 }
             }
@@ -98,7 +135,8 @@ async fn run() -> Result<()> {
                 println!("Already installed: {}", found.display());
             } else {
                 println!("Downloading the streaming speech model (about 650 MB; NVIDIA Open Model License)…");
-                let path = tokio::task::spawn_blocking(nyx_voice_engine::asr::fetch_model).await??;
+                let path =
+                    tokio::task::spawn_blocking(nyx_voice_engine::asr::fetch_model).await??;
                 println!("Installed {}", path.display());
             }
         }
@@ -108,4 +146,15 @@ async fn run() -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// What to tell someone whose dictation didn't start.
+fn dictation_problem(error: &str) -> String {
+    if error.contains("models fetch asr") {
+        "The speech model isn't downloaded yet. Download it in Settings › Capture › Talk to type (about 650 MB).".into()
+    } else if error.contains("connect") || error.contains("No such file") {
+        "Nyx Voice isn't running.".into()
+    } else {
+        error.to_string()
+    }
 }

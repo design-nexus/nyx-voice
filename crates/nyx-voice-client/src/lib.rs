@@ -11,7 +11,10 @@
 
 pub use nyx_voice_proto::voice as proto;
 
-use proto::{ClientLine, DictateAction, Error, ErrorKind, Event, Hello, Mode, Op, Reply, Request, ServerLine, State, Until, API_VERSION};
+use proto::{
+    ClientLine, DictateAction, Error, ErrorKind, Event, Hello, Mode, Op, Reply, Request,
+    ServerLine, State, Until, API_VERSION,
+};
 use std::os::unix::fs::{FileTypeExt, MetadataExt};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -36,12 +39,19 @@ pub fn socket_path() -> PathBuf {
 
 /// The socket must be a socket, ours, and closed to everyone else.
 fn check_socket(path: &Path) -> Result<()> {
-    let meta = std::fs::symlink_metadata(path)
-        .map_err(|e| Error::new(ErrorKind::Unavailable, format!("Nyx Voice isn't running ({}: {e})", path.display())))?;
+    let meta = std::fs::symlink_metadata(path).map_err(|e| {
+        Error::new(
+            ErrorKind::Unavailable,
+            format!("Nyx Voice isn't running ({}: {e})", path.display()),
+        )
+    })?;
     // SAFETY: getuid has no preconditions.
     let uid = unsafe { libc::getuid() };
     if !meta.file_type().is_socket() || meta.uid() != uid || meta.mode() & 0o077 != 0 {
-        return Err(Error::new(ErrorKind::PermissionDenied, format!("{} isn't a private socket of this user", path.display())));
+        return Err(Error::new(
+            ErrorKind::PermissionDenied,
+            format!("{} isn't a private socket of this user", path.display()),
+        ));
     }
     Ok(())
 }
@@ -70,11 +80,17 @@ pub struct Stream {
 
 impl Client {
     pub fn new(app: &str) -> Client {
-        Client { app: app.into(), socket: socket_path() }
+        Client {
+            app: app.into(),
+            socket: socket_path(),
+        }
     }
 
     pub fn with_socket(app: &str, socket: impl Into<PathBuf>) -> Client {
-        Client { app: app.into(), socket: socket.into() }
+        Client {
+            app: app.into(),
+            socket: socket.into(),
+        }
     }
 
     /// Whether the daemon's socket is there.
@@ -84,12 +100,22 @@ impl Client {
 
     async fn connect(&self) -> Result<(BufReader<OwnedReadHalf>, OwnedWriteHalf)> {
         check_socket(&self.socket)?;
-        let stream = UnixStream::connect(&self.socket)
-            .await
-            .map_err(|e| Error::new(ErrorKind::Unavailable, format!("Nyx Voice isn't reachable: {e}")))?;
+        let stream = UnixStream::connect(&self.socket).await.map_err(|e| {
+            Error::new(
+                ErrorKind::Unavailable,
+                format!("Nyx Voice isn't reachable: {e}"),
+            )
+        })?;
         let (read, mut write) = stream.into_split();
         let mut reader = BufReader::new(read);
-        send(&mut write, &ClientLine::Hello(Hello { api_version: API_VERSION, client: self.app.clone() })).await?;
+        send(
+            &mut write,
+            &ClientLine::Hello(Hello {
+                api_version: API_VERSION,
+                client: self.app.clone(),
+            }),
+        )
+        .await?;
         let welcome = tokio::time::timeout(Duration::from_secs(10), read_line(&mut reader))
             .await
             .map_err(|_| Error::new(ErrorKind::Unavailable, "Nyx Voice didn't answer"))??;
@@ -97,10 +123,16 @@ impl Client {
             ServerLine::Hello(w) if w.api_version == API_VERSION => Ok((reader, write)),
             ServerLine::Hello(w) => Err(Error::new(
                 ErrorKind::IncompatibleVersion,
-                format!("Nyx Voice speaks version {}, this app version {API_VERSION}", w.api_version),
+                format!(
+                    "Nyx Voice speaks version {}, this app version {API_VERSION}",
+                    w.api_version
+                ),
             )),
             ServerLine::Error { error, .. } => Err(error),
-            _ => Err(Error::new(ErrorKind::Internal, "unexpected reply from Nyx Voice")),
+            _ => Err(Error::new(
+                ErrorKind::Internal,
+                "unexpected reply from Nyx Voice",
+            )),
         }
     }
 
@@ -108,7 +140,12 @@ impl Client {
     pub async fn stream(&self, op: Op) -> Result<Stream> {
         let (reader, mut writer) = self.connect().await?;
         send(&mut writer, &ClientLine::Request(Request { id: 1, op })).await?;
-        Ok(Stream { reader, writer, id: 1, done: false })
+        Ok(Stream {
+            reader,
+            writer,
+            id: 1,
+            done: false,
+        })
     }
 
     /// Send `op` and wait for its result, skipping events.
@@ -119,7 +156,10 @@ impl Client {
                 return Ok(reply);
             }
         }
-        Err(Error::new(ErrorKind::Unavailable, "Nyx Voice closed the connection"))
+        Err(Error::new(
+            ErrorKind::Unavailable,
+            "Nyx Voice closed the connection",
+        ))
     }
 
     pub async fn status(&self) -> Result<State> {
@@ -131,12 +171,26 @@ impl Client {
 
     /// Capture one take; partial words come as events when `partials`.
     pub async fn listen(&self, mode: Mode, until: Until, partials: bool) -> Result<Stream> {
-        self.stream(Op::Listen { mode, until, partials, max_seconds: None }).await
+        self.stream(Op::Listen {
+            mode,
+            until,
+            partials,
+            max_seconds: None,
+        })
+        .await
     }
 
     /// Capture one take and return its text.
     pub async fn listen_text(&self, mode: Mode, until: Until) -> Result<String> {
-        match self.call(Op::Listen { mode, until, partials: false, max_seconds: None }).await? {
+        match self
+            .call(Op::Listen {
+                mode,
+                until,
+                partials: false,
+                max_seconds: None,
+            })
+            .await?
+        {
             Reply::Transcript { text } => Ok(text),
             other => Err(unexpected(&other)),
         }
@@ -157,7 +211,13 @@ impl Client {
 
     /// Say `text`; returns once it has played.
     pub async fn speak(&self, text: &str) -> Result<()> {
-        self.call(Op::Speak { text: text.into(), voice: None, speed: None }).await.map(|_| ())
+        self.call(Op::Speak {
+            text: text.into(),
+            voice: None,
+            speed: None,
+        })
+        .await
+        .map(|_| ())
     }
 
     pub async fn stop_speaking(&self) -> Result<()> {
@@ -185,7 +245,9 @@ impl Stream {
                 }
             };
             match line {
-                ServerLine::Event { id, event } if id == self.id => return Some(Ok(Item::Event(event))),
+                ServerLine::Event { id, event } if id == self.id => {
+                    return Some(Ok(Item::Event(event)))
+                }
                 ServerLine::Result { id, result } if id == self.id => {
                     self.done = true;
                     return Some(Ok(Item::Done(result)));
@@ -204,32 +266,56 @@ impl Stream {
         if self.done {
             return Ok(());
         }
-        send(&mut self.writer, &ClientLine::Request(Request { id: self.id + 1, op: Op::Cancel { request: self.id } })).await
+        send(
+            &mut self.writer,
+            &ClientLine::Request(Request {
+                id: self.id + 1,
+                op: Op::Cancel { request: self.id },
+            }),
+        )
+        .await
     }
 }
 
 async fn send(writer: &mut OwnedWriteHalf, line: &ClientLine) -> Result<()> {
-    writer.write_all(proto::encode(line).as_bytes()).await.map_err(lost)
+    writer
+        .write_all(proto::encode(line).as_bytes())
+        .await
+        .map_err(lost)
 }
 
 async fn read_line(reader: &mut BufReader<OwnedReadHalf>) -> Result<ServerLine> {
     let mut buf = Vec::new();
     let n = reader.read_until(b'\n', &mut buf).await.map_err(lost)?;
     if n == 0 {
-        return Err(Error::new(ErrorKind::Unavailable, "Nyx Voice closed the connection"));
+        return Err(Error::new(
+            ErrorKind::Unavailable,
+            "Nyx Voice closed the connection",
+        ));
     }
     if buf.len() > proto::MAX_LINE {
         return Err(Error::new(ErrorKind::Internal, "reply line too long"));
     }
-    serde_json::from_slice(&buf).map_err(|e| Error::new(ErrorKind::Internal, format!("unreadable reply from Nyx Voice: {e}")))
+    serde_json::from_slice(&buf).map_err(|e| {
+        Error::new(
+            ErrorKind::Internal,
+            format!("unreadable reply from Nyx Voice: {e}"),
+        )
+    })
 }
 
 fn lost(e: std::io::Error) -> Error {
-    Error::new(ErrorKind::Unavailable, format!("lost the connection to Nyx Voice: {e}"))
+    Error::new(
+        ErrorKind::Unavailable,
+        format!("lost the connection to Nyx Voice: {e}"),
+    )
 }
 
 fn unexpected(reply: &Reply) -> Error {
-    Error::new(ErrorKind::Internal, format!("unexpected reply from Nyx Voice: {reply:?}"))
+    Error::new(
+        ErrorKind::Internal,
+        format!("unexpected reply from Nyx Voice: {reply:?}"),
+    )
 }
 
 /// Blocking calls, for programs without a tokio runtime.

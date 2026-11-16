@@ -20,7 +20,10 @@ pub fn set_app(slug: &'static str, label: &'static str) {
 }
 
 fn app() -> &'static App {
-    APP.get_or_init(|| App { slug: "nyx-voice", label: "Nyx Voice" })
+    APP.get_or_init(|| App {
+        slug: "nyx-voice",
+        label: "Nyx Voice",
+    })
 }
 
 /// The program's PipeWire name ("Assistant", "Nyx Voice").
@@ -39,7 +42,9 @@ fn short(slug: &str) -> &str {
 }
 
 pub fn xdg_runtime() -> PathBuf {
-    std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from).unwrap_or_else(|| cache_dir().join("runtime"))
+    std::env::var_os("XDG_RUNTIME_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| cache_dir().join("runtime"))
 }
 
 pub fn runtime_dir() -> PathBuf {
@@ -47,7 +52,9 @@ pub fn runtime_dir() -> PathBuf {
 }
 
 pub fn data_dir() -> PathBuf {
-    dirs::data_local_dir().unwrap_or_else(|| PathBuf::from(".").join(".local/share")).join(app().slug)
+    dirs::data_local_dir()
+        .unwrap_or_else(|| PathBuf::from(".").join(".local/share"))
+        .join(app().slug)
 }
 
 pub fn models_dir() -> PathBuf {
@@ -55,7 +62,9 @@ pub fn models_dir() -> PathBuf {
 }
 
 pub fn cache_dir() -> PathBuf {
-    dirs::cache_dir().unwrap_or_else(|| PathBuf::from(".").join(".cache")).join(app().slug)
+    dirs::cache_dir()
+        .unwrap_or_else(|| PathBuf::from(".").join(".cache"))
+        .join(app().slug)
 }
 
 const PROGRAMS: [&str; 2] = ["nyx-voice", "nyx-assistant"];
@@ -64,7 +73,12 @@ const PROGRAMS: [&str; 2] = ["nyx-voice", "nyx-assistant"];
 pub fn model_dirs() -> Vec<PathBuf> {
     let base = dirs::data_local_dir().unwrap_or_else(|| PathBuf::from(".").join(".local/share"));
     let mut out = vec![models_dir()];
-    out.extend(PROGRAMS.iter().map(|p| base.join(p).join("models")).filter(|d| *d != models_dir()));
+    out.extend(
+        PROGRAMS
+            .iter()
+            .map(|p| base.join(p).join("models"))
+            .filter(|d| *d != models_dir()),
+    );
     out
 }
 
@@ -85,7 +99,11 @@ mod tests {
     fn the_assistant_keeps_its_pipewire_names() {
         assert_eq!(super::short("nyx-assistant"), "assistant");
         assert_eq!(super::short("nyx-voice"), "voice");
-        assert!(super::model_dirs().iter().any(|d| d.ends_with("nyx-assistant/models")));
-        assert!(super::model_dirs().iter().any(|d| d.ends_with("nyx-voice/models")));
+        assert!(super::model_dirs()
+            .iter()
+            .any(|d| d.ends_with("nyx-assistant/models")));
+        assert!(super::model_dirs()
+            .iter()
+            .any(|d| d.ends_with("nyx-voice/models")));
     }
 }

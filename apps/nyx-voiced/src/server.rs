@@ -3,7 +3,8 @@
 use crate::voice::{Progress, Shared};
 use anyhow::{Context, Result};
 use nyx_voice_proto::voice::{
-    encode, ClientLine, Error, ErrorKind, Event, Op, Reply, Request, ServerLine, Welcome, API_VERSION, MAX_LINE, MAX_SPEAK,
+    encode, ClientLine, Error, ErrorKind, Event, Op, Reply, Request, ServerLine, Welcome,
+    API_VERSION, MAX_LINE, MAX_SPEAK,
 };
 use std::collections::HashMap;
 use std::os::unix::fs::PermissionsExt;
@@ -31,25 +32,45 @@ pub fn bind(path: &Path) -> Result<UnixListener> {
     Ok(listener)
 }
 
-fn caller(stream: &UnixStream, declared: &str, own_dir: &Path, allowed: &[String]) -> Option<Caller> {
+fn caller(
+    stream: &UnixStream,
+    declared: &str,
+    own_dir: &Path,
+    allowed: &[String],
+) -> Option<Caller> {
     let cred = stream.peer_cred().ok()?;
     // SAFETY: getuid has no preconditions.
     if cred.uid() != unsafe { libc::getuid() } {
         return None;
     }
-    let exe: Option<PathBuf> = cred.pid().and_then(|pid| std::fs::read_link(format!("/proc/{pid}/exe")).ok());
+    let exe: Option<PathBuf> = cred
+        .pid()
+        .and_then(|pid| std::fs::read_link(format!("/proc/{pid}/exe")).ok());
     let program = exe.as_deref().and_then(|e| nyx_peer::program(e, own_dir));
-    let named = exe.as_deref().and_then(|e| e.file_name()).map(|n| n.to_string_lossy().into_owned());
-    let allowed_here = named.as_ref().is_some_and(|n| allowed.iter().any(|a| a == n));
+    let named = exe
+        .as_deref()
+        .and_then(|e| e.file_name())
+        .map(|n| n.to_string_lossy().into_owned());
+    let allowed_here = named
+        .as_ref()
+        .is_some_and(|n| allowed.iter().any(|a| a == n));
     Some(match program {
-        Some(name) => Caller { name, trusted: true },
-        None => Caller { name: format!("untrusted:{declared}"), trusted: allowed_here },
+        Some(name) => Caller {
+            name,
+            trusted: true,
+        },
+        None => Caller {
+            name: format!("untrusted:{declared}"),
+            trusted: allowed_here,
+        },
     })
 }
 
 pub async fn serve(voice: Shared, listener: UnixListener, own_dir: PathBuf) {
     loop {
-        let Ok((stream, _)) = listener.accept().await else { continue };
+        let Ok((stream, _)) = listener.accept().await else {
+            continue;
+        };
         let voice = voice.clone();
         let own_dir = own_dir.clone();
         tokio::spawn(async move {
@@ -70,7 +91,14 @@ async fn connection(voice: Shared, stream: UnixStream, own_dir: PathBuf) -> Resu
         Ok(ClientLine::Hello(h)) => h,
         _ => return Ok(()),
     };
-    let Some(who) = caller(stream, &hello.client, &own_dir, &voice.cfg.permissions.microphone) else { return Ok(()) };
+    let Some(who) = caller(
+        stream,
+        &hello.client,
+        &own_dir,
+        &voice.cfg.permissions.microphone,
+    ) else {
+        return Ok(());
+    };
     let (tx, mut rx) = mpsc::unbounded_channel::<ServerLine>();
     let mut write = write;
     tokio::spawn(async move {
@@ -83,11 +111,18 @@ async fn connection(voice: Shared, stream: UnixStream, own_dir: PathBuf) -> Resu
     if hello.api_version != API_VERSION {
         let _ = tx.send(ServerLine::Error {
             id: None,
-            error: Error::new(ErrorKind::IncompatibleVersion, format!("Nyx Voice speaks version {API_VERSION}")),
+            error: Error::new(
+                ErrorKind::IncompatibleVersion,
+                format!("Nyx Voice speaks version {API_VERSION}"),
+            ),
         });
         return Ok(());
     }
-    let _ = tx.send(ServerLine::Hello(Welcome { api_version: API_VERSION, server: env!("CARGO_PKG_VERSION").into(), client: who.name.clone() }));
+    let _ = tx.send(ServerLine::Hello(Welcome {
+        api_version: API_VERSION,
+        server: env!("CARGO_PKG_VERSION").into(),
+        client: who.name.clone(),
+    }));
     let who = Arc::new(who);
     let open: Arc<Mutex<HashMap<u64, CancellationToken>>> = Default::default();
     let closed = CancellationToken::new();
@@ -102,7 +137,10 @@ async fn connection(voice: Shared, stream: UnixStream, own_dir: PathBuf) -> Resu
             Ok(ClientLine::Request(r)) => r,
             Ok(ClientLine::Hello(_)) => continue,
             Err(e) => {
-                let _ = tx.send(ServerLine::Error { id: None, error: Error::new(ErrorKind::InvalidRequest, e.to_string()) });
+                let _ = tx.send(ServerLine::Error {
+                    id: None,
+                    error: Error::new(ErrorKind::InvalidRequest, e.to_string()),
+                });
                 continue;
             }
         };
@@ -110,7 +148,10 @@ async fn connection(voice: Shared, stream: UnixStream, own_dir: PathBuf) -> Resu
             if let Some(t) = open.lock().unwrap().get(&target) {
                 t.cancel();
             }
-            let _ = tx.send(ServerLine::Result { id: request.id, result: Reply::Ok });
+            let _ = tx.send(ServerLine::Result {
+                id: request.id,
+                result: Reply::Ok,
+            });
             continue;
         }
         let cancel = closed.child_token();
@@ -120,7 +161,10 @@ async fn connection(voice: Shared, stream: UnixStream, own_dir: PathBuf) -> Resu
             let id = request.id;
             let line = match handle(&voice, &who, request, &tx, cancel).await {
                 Ok(result) => ServerLine::Result { id, result },
-                Err(error) => ServerLine::Error { id: Some(id), error },
+                Err(error) => ServerLine::Error {
+                    id: Some(id),
+                    error,
+                },
             };
             let _ = tx.send(line);
             open.lock().unwrap().remove(&id);
@@ -130,18 +174,32 @@ async fn connection(voice: Shared, stream: UnixStream, own_dir: PathBuf) -> Resu
     Ok(())
 }
 
-async fn handle(voice: &Shared, who: &Caller, request: Request, tx: &mpsc::UnboundedSender<ServerLine>, cancel: CancellationToken) -> Result<Reply, Error> {
+async fn handle(
+    voice: &Shared,
+    who: &Caller,
+    request: Request,
+    tx: &mpsc::UnboundedSender<ServerLine>,
+    cancel: CancellationToken,
+) -> Result<Reply, Error> {
     let id = request.id;
     let trusted = || {
         if who.trusted {
             Ok(())
         } else {
-            Err(Error::new(ErrorKind::PermissionDenied, format!("{} may not use the microphone", who.name)))
+            Err(Error::new(
+                ErrorKind::PermissionDenied,
+                format!("{} may not use the microphone", who.name),
+            ))
         }
     };
     match request.op {
         Op::Status {} => Ok(Reply::Status(voice.state())),
-        Op::Listen { mode, until, partials, max_seconds } => {
+        Op::Listen {
+            mode,
+            until,
+            partials,
+            max_seconds,
+        } => {
             trusted()?;
             tracing::info!(caller = %who.name, ?mode, "listening");
             let (ptx, mut prx) = mpsc::unbounded_channel();
@@ -159,7 +217,15 @@ async fn handle(voice: &Shared, who: &Caller, request: Request, tx: &mpsc::Unbou
                     }
                 })
             };
-            let text = voice.listen(mode, until, max_seconds.unwrap_or(120).min(120), cancel, Some(ptx)).await;
+            let text = voice
+                .listen(
+                    mode,
+                    until,
+                    max_seconds.unwrap_or(120).min(120),
+                    cancel,
+                    Some(ptx),
+                )
+                .await;
             forward.abort();
             text.map(|text| Reply::Transcript { text })
         }
@@ -175,27 +241,45 @@ async fn handle(voice: &Shared, who: &Caller, request: Request, tx: &mpsc::Unbou
                 None => Reply::Ok,
             })
         }
-        Op::Speak { text, voice: v, speed } => {
+        Op::Speak {
+            text,
+            voice: v,
+            speed,
+        } => {
             if text.len() > MAX_SPEAK {
-                return Err(Error::new(ErrorKind::InvalidRequest, format!("at most {MAX_SPEAK} bytes of text")));
+                return Err(Error::new(
+                    ErrorKind::InvalidRequest,
+                    format!("at most {MAX_SPEAK} bytes of text"),
+                ));
             }
             if speed.is_some_and(|s| !s.is_finite() || !(0.5..=2.0).contains(&s)) {
                 return Err(Error::new(ErrorKind::InvalidRequest, "speed is 0.5 to 2"));
             }
-            let _ = tx.send(ServerLine::Event { id, event: Event::Speaking });
-            voice.speak(&text, v, speed, cancel).await.map(|ms| Reply::Spoken { ms })
+            let _ = tx.send(ServerLine::Event {
+                id,
+                event: Event::Speaking,
+            });
+            voice
+                .speak(&text, v, speed, cancel)
+                .await
+                .map(|ms| Reply::Spoken { ms })
         }
         Op::StopSpeaking {} => {
             voice.stop_speaking();
             Ok(Reply::Ok)
         }
         Op::Devices {} => {
-            let (inputs, outputs) = crate::desktop::devices().await.map_err(|e| Error::new(ErrorKind::Unavailable, format!("{e:#}")))?;
+            let (inputs, outputs) = crate::desktop::devices()
+                .await
+                .map_err(|e| Error::new(ErrorKind::Unavailable, format!("{e:#}")))?;
             Ok(Reply::Devices { inputs, outputs })
         }
         Op::Watch {} => {
             let mut rx = voice.subscribe();
-            let _ = tx.send(ServerLine::Event { id, event: Event::State(rx.borrow().clone()) });
+            let _ = tx.send(ServerLine::Event {
+                id,
+                event: Event::State(rx.borrow().clone()),
+            });
             loop {
                 tokio::select! {
                     _ = cancel.cancelled() => return Err(Error::new(ErrorKind::Cancelled, "cancelled")),
@@ -222,8 +306,16 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let socket = dir.path().join("run/voice.sock");
         let listener = bind(&socket).unwrap();
-        let exe_dir = std::env::current_exe().unwrap().parent().unwrap().to_path_buf();
-        let own = if trusted_here { exe_dir } else { dir.path().to_path_buf() };
+        let exe_dir = std::env::current_exe()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .to_path_buf();
+        let own = if trusted_here {
+            exe_dir
+        } else {
+            dir.path().to_path_buf()
+        };
         let voice = crate::voice::Voice::new(crate::config::VoiceConfig::default());
         tokio::spawn(serve(voice, listener, own));
         (dir, Client::with_socket("nyx-test", socket))
@@ -234,9 +326,18 @@ mod tests {
         let (_dir, client) = start(true).await;
         assert_eq!(client.status().await.unwrap().activity, "idle");
         let mut watch = client.watch().await.unwrap();
-        assert!(matches!(watch.next().await, Some(Ok(Item::Event(Event::State(s)))) if s.activity == "idle"));
+        assert!(
+            matches!(watch.next().await, Some(Ok(Item::Event(Event::State(s)))) if s.activity == "idle")
+        );
         watch.cancel().await.unwrap();
-        let bad = client.call(Op::Speak { text: "hi".into(), voice: None, speed: Some(9.0) }).await.unwrap_err();
+        let bad = client
+            .call(Op::Speak {
+                text: "hi".into(),
+                voice: None,
+                speed: Some(9.0),
+            })
+            .await
+            .unwrap_err();
         assert_eq!(bad.kind, ErrorKind::InvalidRequest);
         assert_eq!(client.dictate(DictateAction::Stop).await.unwrap(), None);
         client.stop_speaking().await.unwrap();
@@ -245,7 +346,10 @@ mod tests {
     #[tokio::test]
     async fn only_trusted_programs_listen_or_type() {
         let (_dir, client) = start(false).await;
-        let e = client.listen_text(Mode::Assistant, Until::Silence).await.unwrap_err();
+        let e = client
+            .listen_text(Mode::Assistant, Until::Silence)
+            .await
+            .unwrap_err();
         assert_eq!(e.kind, ErrorKind::PermissionDenied);
         let e = client.dictate(DictateAction::Toggle).await.unwrap_err();
         assert_eq!(e.kind, ErrorKind::PermissionDenied);

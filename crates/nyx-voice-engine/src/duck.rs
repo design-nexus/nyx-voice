@@ -57,32 +57,67 @@ fn journal() -> PathBuf {
 fn parse_stream(value: &Value) -> Option<Stream> {
     let index = u32::try_from(value["index"].as_u64()?).ok()?;
     let serial = value["properties"]["object.serial"].as_str()?.to_string();
-    let name = value["properties"]["application.name"].as_str().unwrap_or("");
+    let name = value["properties"]["application.name"]
+        .as_str()
+        .unwrap_or("");
     let node = value["properties"]["node.name"].as_str().unwrap_or("");
     let role = value["properties"]["media.role"].as_str().unwrap_or("");
     // Nyx speech (the Assistant's, Nyx Voice's) is never lowered for another.
-    let ours = |n: &str| ["Assistant", "Nyx Voice"].iter().any(|o| n.eq_ignore_ascii_case(o) || n.starts_with(o));
+    let ours = |n: &str| {
+        ["Assistant", "Nyx Voice"]
+            .iter()
+            .any(|o| n.eq_ignore_ascii_case(o) || n.starts_with(o))
+    };
     let eligible = !ours(name)
         && !ours(node)
-        && !matches!(role.to_ascii_lowercase().as_str(), "communication" | "phone");
+        && !matches!(
+            role.to_ascii_lowercase().as_str(),
+            "communication" | "phone"
+        );
     let map = value["volume"].as_object()?;
     let channels = value["channel_map"].as_str()?.split(',').map(str::trim);
-    let volume: Vec<u32> =
-        channels.map(|channel| u32::try_from(map.get(channel)?["value"].as_u64()?).ok()).collect::<Option<_>>()?;
-    (!volume.is_empty()).then_some(Stream { index, serial, volume, eligible })
+    let volume: Vec<u32> = channels
+        .map(|channel| u32::try_from(map.get(channel)?["value"].as_u64()?).ok())
+        .collect::<Option<_>>()?;
+    (!volume.is_empty()).then_some(Stream {
+        index,
+        serial,
+        volume,
+        eligible,
+    })
 }
 
 async fn pactl(args: &[String]) -> Result<String> {
-    let output =
-        tokio::time::timeout(Duration::from_secs(3), Command::new("pactl").args(args).kill_on_drop(true).output()).await??;
-    anyhow::ensure!(output.status.success(), "pactl: {}", String::from_utf8_lossy(&output.stderr).trim());
+    let output = tokio::time::timeout(
+        Duration::from_secs(3),
+        Command::new("pactl").args(args).kill_on_drop(true).output(),
+    )
+    .await??;
+    anyhow::ensure!(
+        output.status.success(),
+        "pactl: {}",
+        String::from_utf8_lossy(&output.stderr).trim()
+    );
     anyhow::ensure!(output.stdout.len() <= 1024 * 1024, "pactl reply too large");
     Ok(String::from_utf8(output.stdout)?)
 }
 
 async fn streams() -> Result<Vec<Stream>> {
-    let data: Value = serde_json::from_str(&pactl(&["-f".into(), "json".into(), "list".into(), "sink-inputs".into()]).await?)?;
-    Ok(data.as_array().context("invalid sink-input list")?.iter().filter_map(parse_stream).collect())
+    let data: Value = serde_json::from_str(
+        &pactl(&[
+            "-f".into(),
+            "json".into(),
+            "list".into(),
+            "sink-inputs".into(),
+        ])
+        .await?,
+    )?;
+    Ok(data
+        .as_array()
+        .context("invalid sink-input list")?
+        .iter()
+        .filter_map(parse_stream)
+        .collect())
 }
 
 async fn set_volume(index: u32, values: &[u32]) -> Result<()> {
@@ -104,7 +139,12 @@ fn save(changed: &BTreeMap<u32, Changed>) -> Result<()> {
     use std::io::Write;
     use std::os::unix::fs::OpenOptionsExt;
     let tmp = path.with_extension("json.new");
-    let mut file = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&tmp)?;
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(&tmp)?;
     file.write_all(&serde_json::to_vec(changed)?)?;
     file.sync_all()?;
     std::fs::rename(tmp, path)?;
@@ -112,13 +152,21 @@ fn save(changed: &BTreeMap<u32, Changed>) -> Result<()> {
 }
 
 fn load() -> BTreeMap<u32, Changed> {
-    std::fs::read(journal()).ok().and_then(|data| serde_json::from_slice(&data).ok()).unwrap_or_default()
+    std::fs::read(journal())
+        .ok()
+        .and_then(|data| serde_json::from_slice(&data).ok())
+        .unwrap_or_default()
 }
 
 async fn restore(changed: &mut BTreeMap<u32, Changed>, current: &[Stream]) -> Result<()> {
     let mut keep = BTreeMap::new();
     for (index, state) in std::mem::take(changed) {
-        let Some(stream) = current.iter().find(|s| s.index == index && s.serial == state.serial) else { continue };
+        let Some(stream) = current
+            .iter()
+            .find(|s| s.index == index && s.serial == state.serial)
+        else {
+            continue;
+        };
         // An app or the user changed the level meanwhile: leave that newer choice alone.
         if stream.volume != state.ducked {
             continue;
@@ -132,7 +180,11 @@ async fn restore(changed: &mut BTreeMap<u32, Changed>, current: &[Stream]) -> Re
     save(changed)
 }
 
-async fn monitor(queued: Arc<AtomicUsize>, gain: f32, mut stop: watch::Receiver<bool>) -> Result<()> {
+async fn monitor(
+    queued: Arc<AtomicUsize>,
+    gain: f32,
+    mut stop: watch::Receiver<bool>,
+) -> Result<()> {
     let mut changed = load();
     // Recover levels from an earlier daemon crash before applying any new ducking.
     if !changed.is_empty() {
@@ -158,19 +210,30 @@ async fn monitor(queued: Arc<AtomicUsize>, gain: f32, mut stop: watch::Receiver<
                     restore(&mut changed, &current).await?;
                     empty_since = None;
                 } else {
-                    changed.retain(|index, state| current.iter().any(|s| s.index == *index && s.serial == state.serial));
+                    changed.retain(|index, state| {
+                        current
+                            .iter()
+                            .any(|s| s.index == *index && s.serial == state.serial)
+                    });
                     for stream in current.iter() {
                         if !stream.eligible || changed.contains_key(&stream.index) {
                             continue;
                         }
-                        let ducked: Vec<u32> =
-                            stream.volume.iter().map(|v| ((*v as f64 * gain as f64).round() as u32).max(1)).collect();
+                        let ducked: Vec<u32> = stream
+                            .volume
+                            .iter()
+                            .map(|v| ((*v as f64 * gain as f64).round() as u32).max(1))
+                            .collect();
                         if ducked == stream.volume {
                             continue;
                         }
                         changed.insert(
                             stream.index,
-                            Changed { serial: stream.serial.clone(), original: stream.volume.clone(), ducked: ducked.clone() },
+                            Changed {
+                                serial: stream.serial.clone(),
+                                original: stream.volume.clone(),
+                                ducked: ducked.clone(),
+                            },
                         );
                         save(&changed)?;
                         if let Err(err) = set_volume(stream.index, &ducked).await {

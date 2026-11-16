@@ -6,9 +6,9 @@
 //! words come back on [`AsrWorker::subscribe`], and [`AsrWorker::finish`] waits for the
 //! final text. A worker that exits is started again on the next utterance.
 
+use crate::config::Settings as Config;
 use anyhow::{bail, Context, Result};
 use nyx_voice_proto::asr::{Frame, Reply};
-use crate::config::Settings as Config;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Mutex;
@@ -19,9 +19,12 @@ use tokio::sync::{broadcast, mpsc};
 /// The model directory and worker binary for `[stt]`, or why streaming can't be used.
 pub fn resolve(cfg: &Config) -> Result<(PathBuf, PathBuf)> {
     let model = if cfg.stt.model == "auto" || cfg.stt.model.is_empty() {
-        let mut dirs = crate::paths::model_dirs().into_iter().map(|d| d.join(nyx_voice_proto::asr::MODEL_NAME));
+        let mut dirs = crate::paths::model_dirs()
+            .into_iter()
+            .map(|d| d.join(nyx_voice_proto::asr::MODEL_NAME));
         let first = crate::paths::models_dir().join(nyx_voice_proto::asr::MODEL_NAME);
-        dirs.find(|d| d.join(nyx_voice_proto::asr::ENCODER).is_file()).unwrap_or(first)
+        dirs.find(|d| d.join(nyx_voice_proto::asr::ENCODER).is_file())
+            .unwrap_or(first)
     } else {
         PathBuf::from(&cfg.stt.model)
     };
@@ -35,9 +38,16 @@ pub fn resolve(cfg: &Config) -> Result<(PathBuf, PathBuf)> {
 
 /// `nyx-voice-asr` beside this program, else on `PATH`.
 pub fn worker_binary() -> Option<PathBuf> {
-    let here = std::env::current_exe().ok().map(|e| e.with_file_name("nyx-voice-asr")).filter(|p| p.is_file());
+    let here = std::env::current_exe()
+        .ok()
+        .map(|e| e.with_file_name("nyx-voice-asr"))
+        .filter(|p| p.is_file());
     here.or_else(|| {
-        std::env::var_os("PATH")?.to_str()?.split(':').map(|d| PathBuf::from(d).join("nyx-voice-asr")).find(|p| p.is_file())
+        std::env::var_os("PATH")?
+            .to_str()?
+            .split(':')
+            .map(|d| PathBuf::from(d).join("nyx-voice-asr"))
+            .find(|p| p.is_file())
     })
 }
 
@@ -92,7 +102,12 @@ impl AsrWorker {
         let mut child = tokio::process::Command::new(&self.worker)
             .arg("--model")
             .arg(&self.model)
-            .args(["--threads", &self.threads.to_string(), "--provider", &self.provider])
+            .args([
+                "--threads",
+                &self.threads.to_string(),
+                "--provider",
+                &self.provider,
+            ])
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::inherit())
@@ -139,7 +154,11 @@ impl AsrWorker {
             alive_r.store(false, Ordering::SeqCst);
             tracing::warn!("streaming recognizer exited");
         });
-        *self.running.lock().unwrap() = Some(Running { frames, alive, _child: child });
+        *self.running.lock().unwrap() = Some(Running {
+            frames,
+            alive,
+            _child: child,
+        });
         Ok(())
     }
 
@@ -152,7 +171,11 @@ impl AsrWorker {
     }
 
     fn alive(&self) -> bool {
-        self.running.lock().unwrap().as_ref().is_some_and(|r| r.alive.load(Ordering::SeqCst))
+        self.running
+            .lock()
+            .unwrap()
+            .as_ref()
+            .is_some_and(|r| r.alive.load(Ordering::SeqCst))
     }
 
     /// A new utterance id; starts the worker again first if it had exited.
@@ -181,19 +204,30 @@ impl AsrWorker {
     }
 
     /// End the utterance and wait for its final text.
-    pub async fn finish(&self, utterance: u32, cancel: &tokio_util::sync::CancellationToken) -> Result<String> {
+    pub async fn finish(
+        &self,
+        utterance: u32,
+        cancel: &tokio_util::sync::CancellationToken,
+    ) -> Result<String> {
         let mut rx = self.subscribe();
-        anyhow::ensure!(self.send(Frame::finish(utterance)), "the speech recognizer isn't running");
+        anyhow::ensure!(
+            self.send(Frame::finish(utterance)),
+            "the speech recognizer isn't running"
+        );
         let wait = async {
             loop {
                 match rx.recv().await {
-                    Ok(Reply::Final { u, text, decode_ms, .. }) if u == utterance => {
+                    Ok(Reply::Final {
+                        u, text, decode_ms, ..
+                    }) if u == utterance => {
                         tracing::debug!(decode_ms, "final transcript");
                         return Ok(text);
                     }
                     Ok(Reply::Error { message }) => bail!("speech recognizer: {message}"),
                     Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) => {}
-                    Err(broadcast::error::RecvError::Closed) => bail!("the speech recognizer stopped"),
+                    Err(broadcast::error::RecvError::Closed) => {
+                        bail!("the speech recognizer stopped")
+                    }
                 }
             }
         };
@@ -226,10 +260,18 @@ pub struct Stt {
 impl Stt {
     pub async fn new(cfg: &Config) -> Self {
         match AsrWorker::start(cfg).await {
-            Ok(w) => Self { asr: Some(w), unavailable: String::new(), current: Mutex::new(None) },
+            Ok(w) => Self {
+                asr: Some(w),
+                unavailable: String::new(),
+                current: Mutex::new(None),
+            },
             Err(err) => {
                 tracing::warn!("speech recognition unavailable: {err:#}");
-                Self { asr: None, unavailable: format!("{err:#}"), current: Mutex::new(None) }
+                Self {
+                    asr: None,
+                    unavailable: format!("{err:#}"),
+                    current: Mutex::new(None),
+                }
             }
         }
     }
@@ -249,7 +291,9 @@ impl Stt {
     }
 
     fn worker(&self) -> Result<&AsrWorker> {
-        self.asr.as_ref().ok_or_else(|| anyhow::anyhow!("speech recognition isn't available: {}", self.unavailable))
+        self.asr.as_ref().ok_or_else(|| {
+            anyhow::anyhow!("speech recognition isn't available: {}", self.unavailable)
+        })
     }
 
     /// Start listening for a take (PTT key-down, a wake utterance's onset).
@@ -282,24 +326,38 @@ impl Stt {
 
     /// The take's text. Streamed audio was decoded while it was captured, so only the tail
     /// is left; a take that wasn't streamed is transcribed whole.
-    pub async fn finish(&self, pcm: &[i16], cancel: tokio_util::sync::CancellationToken) -> Result<Transcript> {
+    pub async fn finish(
+        &self,
+        pcm: &[i16],
+        cancel: tokio_util::sync::CancellationToken,
+    ) -> Result<Transcript> {
         let asr = self.worker()?;
         let current = self.current.lock().unwrap().take();
         let text = match current {
             Some(u) => asr.finish(u, &cancel).await?,
             None => return self.transcribe(pcm, cancel).await,
         };
-        Ok(Transcript { text, is_partial: false })
+        Ok(Transcript {
+            text,
+            is_partial: false,
+        })
     }
 
     /// Transcribe a whole buffer.
-    pub async fn transcribe(&self, pcm: &[i16], cancel: tokio_util::sync::CancellationToken) -> Result<Transcript> {
+    pub async fn transcribe(
+        &self,
+        pcm: &[i16],
+        cancel: tokio_util::sync::CancellationToken,
+    ) -> Result<Transcript> {
         let asr = self.worker()?;
         let u = asr.begin().await?;
         for chunk in pcm.chunks(8_000) {
             asr.feed(u, chunk);
         }
-        Ok(Transcript { text: asr.finish(u, &cancel).await?, is_partial: false })
+        Ok(Transcript {
+            text: asr.finish(u, &cancel).await?,
+            is_partial: false,
+        })
     }
 }
 
@@ -324,10 +382,18 @@ pub fn fetch_model() -> Result<PathBuf> {
     std::fs::create_dir_all(&dir)?;
     let tmp = tempfile::tempdir_in(&dir)?;
     let archive = tmp.path().join("model.tar.bz2");
-    let ok = std::process::Command::new("curl").args(["-fL", "--progress-bar", "-o"]).arg(&archive).arg(MODEL_URL).status()?.success();
+    let ok = std::process::Command::new("curl")
+        .args(["-fL", "--progress-bar", "-o"])
+        .arg(&archive)
+        .arg(MODEL_URL)
+        .status()?
+        .success();
     anyhow::ensure!(ok, "the download failed");
     let got = crate::checksum::sha256_file(&archive)?;
-    anyhow::ensure!(got == MODEL_SHA256, "the downloaded model doesn't match its checksum (got {got}, expected {MODEL_SHA256})");
+    anyhow::ensure!(
+        got == MODEL_SHA256,
+        "the downloaded model doesn't match its checksum (got {got}, expected {MODEL_SHA256})"
+    );
     let ok = std::process::Command::new("tar")
         .args(["--no-same-owner", "--no-same-permissions", "-xjf"])
         .arg(&archive)
@@ -338,7 +404,10 @@ pub fn fetch_model() -> Result<PathBuf> {
     anyhow::ensure!(ok, "the archive could not be unpacked");
     crate::checksum::only_plain_files(tmp.path())?;
     let unpacked = tmp.path().join(MODEL_NAME);
-    anyhow::ensure!(unpacked.join(ENCODER).is_file(), "the archive doesn't hold {MODEL_NAME}");
+    anyhow::ensure!(
+        unpacked.join(ENCODER).is_file(),
+        "the archive doesn't hold {MODEL_NAME}"
+    );
     let _ = std::fs::remove_dir_all(unpacked.join("test_wavs"));
     std::fs::rename(&unpacked, &target)?;
     Ok(target)

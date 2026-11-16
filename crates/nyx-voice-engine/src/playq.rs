@@ -68,7 +68,12 @@ impl PlayQueue {
             return;
         }
         self.queued += pcm.len();
-        self.segments.push_back(Segment { generation, phrase, pcm, pos: 0 });
+        self.segments.push_back(Segment {
+            generation,
+            phrase,
+            pcm,
+            pos: 0,
+        });
     }
 
     /// Samples still to play.
@@ -99,7 +104,9 @@ impl PlayQueue {
     }
 
     /// Hold playback in place: silence goes out and nothing queued is used up.
-    pub fn is_paused(&self) -> bool { self.paused }
+    pub fn is_paused(&self) -> bool {
+        self.paused
+    }
 
     pub fn set_paused(&mut self, paused: bool) {
         self.paused = paused;
@@ -111,7 +118,12 @@ impl PlayQueue {
 
     /// The gaps heard so far in `generation`'s reply, in ms; older replies' are dropped.
     pub fn take_gaps(&mut self, generation: u64) -> Vec<u32> {
-        let gaps = self.gaps.iter().filter(|(g, _)| *g == generation).map(|(_, n)| (n * 1000 / RATE) as u32).collect();
+        let gaps = self
+            .gaps
+            .iter()
+            .filter(|(g, _)| *g == generation)
+            .map(|(_, n)| (n * 1000 / RATE) as u32)
+            .collect();
         self.gaps.retain(|(g, _)| *g > generation);
         gaps
     }
@@ -140,7 +152,12 @@ impl PlayQueue {
             let s = seg.pcm[seg.pos];
             seg.pos += 1;
             self.queued -= 1;
-            self.played = PlayedTo { generation: seg.generation, phrase: seg.phrase, samples: seg.pos, total: seg.pcm.len() };
+            self.played = PlayedTo {
+                generation: seg.generation,
+                phrase: seg.phrase,
+                samples: seg.pos,
+                total: seg.pcm.len(),
+            };
             if seg.pos == seg.pcm.len() {
                 let ended = (seg.generation, seg.phrase);
                 self.segments.pop_front();
@@ -167,12 +184,28 @@ mod tests {
         let mut out = [0.0; 4];
         q.pull(&mut out);
         assert_eq!(out, [0.5, 0.5, 0.5, 0.25]);
-        assert_eq!(q.played(), PlayedTo { generation: 1, phrase: 1, samples: 1, total: 2 });
+        assert_eq!(
+            q.played(),
+            PlayedTo {
+                generation: 1,
+                phrase: 1,
+                samples: 1,
+                total: 2
+            }
+        );
         let mut out = [9.0; 3];
         q.pull(&mut out);
         assert_eq!(out, [0.25, 0.0, 0.0], "silence once dry");
         assert_eq!(q.queued(), 0);
-        assert_eq!(q.played(), PlayedTo { generation: 1, phrase: 1, samples: 2, total: 2 });
+        assert_eq!(
+            q.played(),
+            PlayedTo {
+                generation: 1,
+                phrase: 1,
+                samples: 2,
+                total: 2
+            }
+        );
     }
 
     #[test]
@@ -217,7 +250,9 @@ mod tests {
         let mut out = vec![0.0; 1000];
         q.pull(&mut out);
         // No step between neighbours larger than the ramp, and it settles at the target.
-        assert!(out.windows(2).all(|w| (w[0] - w[1]).abs() <= 1.0 / RAMP_SAMPLES + 1e-6));
+        assert!(out
+            .windows(2)
+            .all(|w| (w[0] - w[1]).abs() <= 1.0 / RAMP_SAMPLES + 1e-6));
         assert!((out[999] - 0.25).abs() < 1e-6);
         assert!(out[0] > 0.99, "starts from full volume");
     }

@@ -33,7 +33,13 @@ pub struct DictationCfg {
 
 impl Default for DictationCfg {
     fn default() -> Self {
-        Self { output: "type".into(), fallback_to_clipboard: true, type_delay_ms: 1, pause_media: true, max_seconds: 60 }
+        Self {
+            output: "type".into(),
+            fallback_to_clipboard: true,
+            type_delay_ms: 1,
+            pause_media: true,
+            max_seconds: 60,
+        }
     }
 }
 
@@ -45,11 +51,15 @@ pub struct PermissionsCfg {
 }
 
 pub fn config_path() -> PathBuf {
-    dirs::config_dir().unwrap_or_else(|| PathBuf::from(".config")).join("nyx-voice/config.toml")
+    dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from(".config"))
+        .join("nyx-voice/config.toml")
 }
 
 fn assistant_config() -> PathBuf {
-    dirs::config_dir().unwrap_or_else(|| PathBuf::from(".config")).join("nyx-assistant/config.toml")
+    dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from(".config"))
+        .join("nyx-assistant/config.toml")
 }
 
 /// The daemon's settings. It never listens while speaking, so it loads no echo canceller.
@@ -65,7 +75,12 @@ pub fn load() -> VoiceConfig {
         }
     };
     let mut cfg = read(config_path())
-        .or_else(|| read(assistant_config()).map(|a| VoiceConfig { speech: a.speech, ..Default::default() }))
+        .or_else(|| {
+            read(assistant_config()).map(|a| VoiceConfig {
+                speech: a.speech,
+                ..Default::default()
+            })
+        })
         .unwrap_or_default();
     cfg.speech.barge_in.aec = false;
     cfg.dictation.max_seconds = cfg.dictation.max_seconds.clamp(5, 300);

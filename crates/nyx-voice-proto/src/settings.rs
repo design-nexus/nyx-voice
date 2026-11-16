@@ -40,7 +40,12 @@ impl SttCfg {
 
 impl Default for SttCfg {
     fn default() -> Self {
-        Self { provider: "streaming".into(), model: "auto".into(), threads: 2, device: "cpu".into() }
+        Self {
+            provider: "streaming".into(),
+            model: "auto".into(),
+            threads: 2,
+            device: "cpu".into(),
+        }
     }
 }
 
@@ -124,7 +129,8 @@ pub fn default_silero_sha256() -> String {
 
 /// The address older settings saved, from the moving `master` branch: the pinned one
 /// stands in for it.
-pub const OLD_SILERO_URL: &str = "https://github.com/snakers4/silero-vad/raw/master/src/silero_vad/data/silero_vad.onnx";
+pub const OLD_SILERO_URL: &str =
+    "https://github.com/snakers4/silero-vad/raw/master/src/silero_vad/data/silero_vad.onnx";
 
 impl VadCfg {
     pub fn wants_silero(&self) -> bool {
@@ -168,6 +174,12 @@ pub struct BargeInCfg {
 
 impl Default for BargeInCfg {
     fn default() -> Self {
-        Self { enabled: true, grace_ms: 500, threshold: 0.08, hangover_ms: 160, aec: true }
+        Self {
+            enabled: true,
+            grace_ms: 500,
+            threshold: 0.08,
+            hangover_ms: 160,
+            aec: true,
+        }
     }
 }

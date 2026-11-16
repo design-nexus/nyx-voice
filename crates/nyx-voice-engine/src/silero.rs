@@ -1,8 +1,8 @@
 //! Silero VAD v5 on ONNX Runtime CPU, sharing loqui's `ort` crate.
 
-use anyhow::{Context, Result};
 use crate::config::VadCfg;
 use crate::paths;
+use anyhow::{Context, Result};
 use ort::session::Session;
 use ort::value::Tensor;
 use std::path::{Path, PathBuf};
@@ -194,12 +194,19 @@ pub fn model_path(cfg: &VadCfg) -> PathBuf {
 }
 
 fn ensure_model(path: &Path, cfg: &VadCfg) -> Result<()> {
-    let url = if cfg.url == nyx_voice_proto::settings::OLD_SILERO_URL { nyx_voice_proto::settings::default_silero_url() } else { cfg.url.clone() };
+    let url = if cfg.url == nyx_voice_proto::settings::OLD_SILERO_URL {
+        nyx_voice_proto::settings::default_silero_url()
+    } else {
+        cfg.url.clone()
+    };
     let url = url.as_str();
     let want = cfg.sha256.trim();
     if path.exists() {
         // A model fetched before the check, or by another program: verified once more.
-        if want.is_empty() || !cfg.model.trim().is_empty() || crate::checksum::sha256_file(path)? == want {
+        if want.is_empty()
+            || !cfg.model.trim().is_empty()
+            || crate::checksum::sha256_file(path)? == want
+        {
             return Ok(());
         }
         tracing::warn!(path = %path.display(), "the silero model doesn't match its checksum; fetching it again");
@@ -267,12 +274,18 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let fake = dir.path().join("fake.onnx");
         std::fs::write(&fake, "not the model").unwrap();
-        let cfg = VadCfg { url: format!("file://{}", fake.display()), ..Default::default() };
+        let cfg = VadCfg {
+            url: format!("file://{}", fake.display()),
+            ..Default::default()
+        };
         let target = dir.path().join("cache/silero_vad.onnx");
         let err = ensure_model(&target, &cfg).unwrap_err().to_string();
         assert!(err.contains("checksum"), "{err}");
         assert!(!target.exists());
-        let open = VadCfg { sha256: String::new(), ..cfg };
+        let open = VadCfg {
+            sha256: String::new(),
+            ..cfg
+        };
         ensure_model(&target, &open).unwrap();
         assert!(target.exists());
     }

@@ -91,7 +91,9 @@ pub enum Op {
     /// End the current take now (a push-to-talk key released).
     StopListening {},
     /// Dictation to the focused window: the daemon captures, transcribes and types.
-    Dictate { action: DictateAction },
+    Dictate {
+        action: DictateAction,
+    },
     /// Say `text`; the result comes when it has been played.
     Speak {
         text: String,
@@ -105,7 +107,9 @@ pub enum Op {
     /// `state` events whenever capture or speech starts or stops, until the connection closes.
     Watch {},
     /// Cancel request `request` on this connection.
-    Cancel { request: u64 },
+    Cancel {
+        request: u64,
+    },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -141,7 +145,9 @@ pub enum Event {
     /// The microphone is open for this take.
     Capturing,
     /// Words so far.
-    Partial { text: String },
+    Partial {
+        text: String,
+    },
     /// The take ended; its text is being finished.
     Transcribing,
     Speaking,
@@ -154,11 +160,20 @@ pub enum Reply {
     Ok,
     Status(State),
     /// A take's text (empty when nothing was said).
-    Transcript { text: String },
+    Transcript {
+        text: String,
+    },
     /// What dictation typed.
-    Dictated { text: String },
-    Spoken { ms: u64 },
-    Devices { inputs: Vec<Device>, outputs: Vec<Device> },
+    Dictated {
+        text: String,
+    },
+    Spoken {
+        ms: u64,
+    },
+    Devices {
+        inputs: Vec<Device>,
+        outputs: Vec<Device>,
+    },
 }
 
 /// What Nyx Voice is doing, and what it can do.
@@ -207,7 +222,10 @@ pub struct Error {
 
 impl Error {
     pub fn new(kind: ErrorKind, message: impl Into<String>) -> Error {
-        Error { kind, message: message.into() }
+        Error {
+            kind,
+            message: message.into(),
+        }
     }
 }
 
@@ -232,14 +250,45 @@ mod tests {
 
     #[test]
     fn lines_round_trip() {
-        let req = ClientLine::Request(Request { id: 3, op: Op::Listen { mode: Mode::Assistant, until: Until::Stop, partials: true, max_seconds: None } });
+        let req = ClientLine::Request(Request {
+            id: 3,
+            op: Op::Listen {
+                mode: Mode::Assistant,
+                until: Until::Stop,
+                partials: true,
+                max_seconds: None,
+            },
+        });
         let line = encode(&req);
         assert_eq!(line, "{\"request\":{\"id\":3,\"op\":{\"type\":\"listen\",\"mode\":\"assistant\",\"until\":\"stop\",\"partials\":true}}}\n");
-        assert_eq!(serde_json::from_str::<ClientLine>(line.trim()).unwrap(), req);
-        let dictate: ClientLine = serde_json::from_str(r#"{"request":{"id":1,"op":{"type":"dictate","action":"toggle"}}}"#).unwrap();
-        assert!(matches!(dictate, ClientLine::Request(Request { op: Op::Dictate { action: DictateAction::Toggle }, .. })));
-        assert!(serde_json::from_str::<ClientLine>(r#"{"request":{"id":1,"op":{"type":"status","extra":1}}}"#).is_err());
-        let ev = encode(&ServerLine::Event { id: 3, event: Event::Partial { text: "hel".into() } });
-        assert_eq!(ev, "{\"event\":{\"id\":3,\"event\":{\"type\":\"partial\",\"text\":\"hel\"}}}\n");
+        assert_eq!(
+            serde_json::from_str::<ClientLine>(line.trim()).unwrap(),
+            req
+        );
+        let dictate: ClientLine = serde_json::from_str(
+            r#"{"request":{"id":1,"op":{"type":"dictate","action":"toggle"}}}"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            dictate,
+            ClientLine::Request(Request {
+                op: Op::Dictate {
+                    action: DictateAction::Toggle
+                },
+                ..
+            })
+        ));
+        assert!(serde_json::from_str::<ClientLine>(
+            r#"{"request":{"id":1,"op":{"type":"status","extra":1}}}"#
+        )
+        .is_err());
+        let ev = encode(&ServerLine::Event {
+            id: 3,
+            event: Event::Partial { text: "hel".into() },
+        });
+        assert_eq!(
+            ev,
+            "{\"event\":{\"id\":3,\"event\":{\"type\":\"partial\",\"text\":\"hel\"}}}\n"
+        );
     }
 }

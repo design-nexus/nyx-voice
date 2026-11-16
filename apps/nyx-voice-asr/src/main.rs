@@ -4,7 +4,10 @@
 //!   nyx-voice-asr --model DIR [--threads N] [--provider cpu|cuda]
 
 use anyhow::{bail, Context, Result};
-use nyx_voice_proto::asr::{Frame, Kind, Reply, DECODER, ENCODER, JOINER, LEAD_PAD_SAMPLES, SAMPLE_RATE, TAIL_PAD_SAMPLES, TOKENS};
+use nyx_voice_proto::asr::{
+    Frame, Kind, Reply, DECODER, ENCODER, JOINER, LEAD_PAD_SAMPLES, SAMPLE_RATE, TAIL_PAD_SAMPLES,
+    TOKENS,
+};
 use sherpa_onnx::{OnlineRecognizer, OnlineRecognizerConfig, OnlineStream};
 use std::io::{BufWriter, Write};
 use std::path::PathBuf;
@@ -17,7 +20,11 @@ struct Args {
 }
 
 fn args() -> Result<Args> {
-    let mut a = Args { model: PathBuf::new(), threads: 2, provider: "cpu".into() };
+    let mut a = Args {
+        model: PathBuf::new(),
+        threads: 2,
+        provider: "cpu".into(),
+    };
     let mut it = std::env::args().skip(1);
     while let Some(flag) = it.next() {
         let mut value = || it.next().with_context(|| format!("{flag} needs a value"));
@@ -81,7 +88,9 @@ fn feed(rec: &OnlineRecognizer, u: &mut Utterance, samples: &[i16]) {
 }
 
 fn text(rec: &OnlineRecognizer, u: &Utterance) -> String {
-    rec.get_result(&u.stream).map(|r| r.text.trim().to_string()).unwrap_or_default()
+    rec.get_result(&u.stream)
+        .map(|r| r.text.trim().to_string())
+        .unwrap_or_default()
 }
 
 fn main() -> Result<()> {
@@ -92,11 +101,21 @@ fn main() -> Result<()> {
     let rec = match recognizer(&a) {
         Ok(rec) => rec,
         Err(e) => {
-            send(&mut out, &Reply::Error { message: format!("{e:#}") })?;
+            send(
+                &mut out,
+                &Reply::Error {
+                    message: format!("{e:#}"),
+                },
+            )?;
             return Err(e);
         }
     };
-    send(&mut out, &Reply::Ready { load_ms: started.elapsed().as_millis() as u64 })?;
+    send(
+        &mut out,
+        &Reply::Ready {
+            load_ms: started.elapsed().as_millis() as u64,
+        },
+    )?;
     let stdin = std::io::stdin();
     let mut input = std::io::BufReader::new(stdin.lock());
     let mut current: Option<Utterance> = None;
@@ -104,7 +123,12 @@ fn main() -> Result<()> {
         match frame.kind {
             Kind::Audio => {
                 if current.as_ref().is_none_or(|u| u.id != frame.utterance) {
-                    let mut u = Utterance { id: frame.utterance, stream: rec.create_stream(), samples: 0, last: String::new() };
+                    let mut u = Utterance {
+                        id: frame.utterance,
+                        stream: rec.create_stream(),
+                        samples: 0,
+                        last: String::new(),
+                    };
                     feed(&rec, &mut u, &vec![0i16; LEAD_PAD_SAMPLES]);
                     // audio_ms counts the caller's audio, not the padding.
                     u.samples = 0;
@@ -114,7 +138,14 @@ fn main() -> Result<()> {
                 feed(&rec, u, &frame.samples);
                 let now = text(&rec, u);
                 if now != u.last {
-                    send(&mut out, &Reply::Partial { u: u.id, text: now.clone(), audio_ms: ms(u.samples) })?;
+                    send(
+                        &mut out,
+                        &Reply::Partial {
+                            u: u.id,
+                            text: now.clone(),
+                            audio_ms: ms(u.samples),
+                        },
+                    )?;
                     u.last = now;
                 }
             }
@@ -136,7 +167,15 @@ fn main() -> Result<()> {
                         (String::new(), 0)
                     }
                 };
-                send(&mut out, &Reply::Final { u: frame.utterance, text, audio_ms, decode_ms: t.elapsed().as_millis() as u64 })?;
+                send(
+                    &mut out,
+                    &Reply::Final {
+                        u: frame.utterance,
+                        text,
+                        audio_ms,
+                        decode_ms: t.elapsed().as_millis() as u64,
+                    },
+                )?;
             }
             Kind::Abort => {
                 if current.as_ref().is_some_and(|u| u.id == frame.utterance) {

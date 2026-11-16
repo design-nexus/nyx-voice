@@ -27,7 +27,9 @@ fn activated() -> Option<tokio::net::UnixListener> {
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
+        )
         .with_target(false)
         .init();
     nyx_voice_engine::paths::set_app("nyx-voice", "Nyx Voice");
@@ -50,7 +52,8 @@ async fn main() {
             idle.release_idle().await;
         }
     });
-    let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).expect("signal");
+    let mut term =
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).expect("signal");
     tokio::select! {
         _ = server::serve(voice.clone(), listener, own_dir) => {}
         _ = term.recv() => {}

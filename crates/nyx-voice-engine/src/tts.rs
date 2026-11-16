@@ -1,6 +1,6 @@
-use anyhow::{Context, Result};
 use crate::config::Settings as Config;
 use crate::paths;
+use anyhow::{Context, Result};
 use loqui::{Engine, Format, KokoroVariant, SpeakRequest, TtsConfig, TtsDevice};
 use std::io::{BufRead, BufReader, Cursor, Write};
 use std::os::fd::AsRawFd;
@@ -15,7 +15,9 @@ use tokio_util::sync::CancellationToken;
 const CLONE_IDLE: Duration = Duration::from_secs(120);
 
 #[derive(Clone, PartialEq, Eq)]
-struct CloneSpec { reference: PathBuf }
+struct CloneSpec {
+    reference: PathBuf,
+}
 
 struct CloneWorker {
     child: Child,
@@ -36,55 +38,101 @@ impl CloneWorker {
         let root = chatterbox_root();
         let python = root.join(".venv/bin/python");
         let script = root.join("worker.py");
-        anyhow::ensure!(python.is_file() && script.is_file(), "Chatterbox runtime is not installed");
+        anyhow::ensure!(
+            python.is_file() && script.is_file(),
+            "Chatterbox runtime is not installed"
+        );
         let mut child = Command::new(python)
             .arg(script)
             .env("HF_HUB_OFFLINE", "1")
             .env("TRANSFORMERS_OFFLINE", "1")
-            .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::inherit())
-            .spawn().context("start local Chatterbox worker")?;
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .context("start local Chatterbox worker")?;
         let input = child.stdin.take().context("Chatterbox stdin")?;
         let output = BufReader::new(child.stdout.take().context("Chatterbox stdout")?);
-        Ok(Self { child, input, output, last_used: Instant::now() })
+        Ok(Self {
+            child,
+            input,
+            output,
+            last_used: Instant::now(),
+        })
     }
 
-    fn speak(&mut self, text: &str, spec: &CloneSpec, cancel: &CancellationToken) -> Result<Vec<f32>> {
+    fn speak(
+        &mut self,
+        text: &str,
+        spec: &CloneSpec,
+        cancel: &CancellationToken,
+    ) -> Result<Vec<f32>> {
         anyhow::ensure!(!cancel.is_cancelled(), "TTS cancelled");
         std::fs::create_dir_all(paths::runtime_dir())?;
         let output = tempfile::NamedTempFile::new_in(paths::runtime_dir())?;
-        let request = serde_json::json!({"text":text,"reference":spec.reference,"output":output.path()});
+        let request =
+            serde_json::json!({"text":text,"reference":spec.reference,"output":output.path()});
         writeln!(self.input, "{request}")?;
         self.input.flush()?;
         let started = Instant::now();
         loop {
             anyhow::ensure!(!cancel.is_cancelled(), "TTS cancelled");
-            anyhow::ensure!(started.elapsed() < Duration::from_secs(120), "Chatterbox response timed out");
-            let mut fd = libc::pollfd { fd: self.output.get_ref().as_raw_fd(), events: libc::POLLIN, revents: 0 };
+            anyhow::ensure!(
+                started.elapsed() < Duration::from_secs(120),
+                "Chatterbox response timed out"
+            );
+            let mut fd = libc::pollfd {
+                fd: self.output.get_ref().as_raw_fd(),
+                events: libc::POLLIN,
+                revents: 0,
+            };
             // SAFETY: fd points to the child stdout; poll only reads the descriptor state.
             let ready = unsafe { libc::poll(&mut fd, 1, 50) };
-            if ready > 0 { break; }
+            if ready > 0 {
+                break;
+            }
             if ready < 0 {
                 let error = std::io::Error::last_os_error();
-                if error.kind() != std::io::ErrorKind::Interrupted { return Err(error.into()); }
+                if error.kind() != std::io::ErrorKind::Interrupted {
+                    return Err(error.into());
+                }
             }
         }
         anyhow::ensure!(!cancel.is_cancelled(), "TTS cancelled");
         let mut line = String::new();
-        anyhow::ensure!(self.output.read_line(&mut line)? > 0, "Chatterbox worker exited");
-        let response: serde_json::Value = serde_json::from_str(&line).context("Chatterbox response")?;
-        anyhow::ensure!(response["ok"] == true, "Chatterbox: {}", response["error"].as_str().unwrap_or("unknown failure"));
-        anyhow::ensure!(response["sample_rate"] == 24_000, "Chatterbox sample rate changed");
+        anyhow::ensure!(
+            self.output.read_line(&mut line)? > 0,
+            "Chatterbox worker exited"
+        );
+        let response: serde_json::Value =
+            serde_json::from_str(&line).context("Chatterbox response")?;
+        anyhow::ensure!(
+            response["ok"] == true,
+            "Chatterbox: {}",
+            response["error"].as_str().unwrap_or("unknown failure")
+        );
+        anyhow::ensure!(
+            response["sample_rate"] == 24_000,
+            "Chatterbox sample rate changed"
+        );
         let bytes = std::fs::read(output.path())?;
         anyhow::ensure!(bytes.len() % 4 == 0, "Chatterbox PCM is malformed");
         self.last_used = Instant::now();
-        Ok(bytes.as_chunks::<4>().0.iter().map(|c| f32::from_le_bytes(*c)).collect())
+        Ok(bytes
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|c| f32::from_le_bytes(*c))
+            .collect())
     }
 }
 
 /// The optional Chatterbox runtime, wherever a Nyx speech program installed it.
 fn chatterbox_root() -> PathBuf {
     let base = paths::data_dir();
-    let assistant = dirs::data_local_dir().unwrap_or_default().join("nyx-assistant");
+    let assistant = dirs::data_local_dir()
+        .unwrap_or_default()
+        .join("nyx-assistant");
     [base, assistant]
         .into_iter()
         .map(|d| d.join("voice-engines/chatterbox"))
@@ -236,15 +284,22 @@ impl KokoroProvider {
 
     fn start_clone_reaper(worker: &Arc<Mutex<Option<CloneWorker>>>) {
         let weak = Arc::downgrade(worker);
-        let _ = std::thread::Builder::new().name("chatterbox-idle".into()).spawn(move || loop {
-            std::thread::sleep(Duration::from_secs(15));
-            let Some(worker) = weak.upgrade() else { break; };
-            let mut worker = worker.lock().unwrap_or_else(|e| e.into_inner());
-            if worker.as_ref().is_some_and(|child| child.last_used.elapsed() >= CLONE_IDLE) {
-                tracing::info!("unloading idle Chatterbox worker");
-                *worker = None;
-            }
-        });
+        let _ = std::thread::Builder::new()
+            .name("chatterbox-idle".into())
+            .spawn(move || loop {
+                std::thread::sleep(Duration::from_secs(15));
+                let Some(worker) = weak.upgrade() else {
+                    break;
+                };
+                let mut worker = worker.lock().unwrap_or_else(|e| e.into_inner());
+                if worker
+                    .as_ref()
+                    .is_some_and(|child| child.last_used.elapsed() >= CLONE_IDLE)
+                {
+                    tracing::info!("unloading idle Chatterbox worker");
+                    *worker = None;
+                }
+            });
     }
 
     pub fn device(&self) -> &str {
@@ -263,8 +318,17 @@ impl KokoroProvider {
     }
 
     pub fn active_backend(&self) -> &'static str {
-        if self.clone_spec.read().unwrap_or_else(|e| e.into_inner()).is_some()
-            && !self.clone_failed.load(Ordering::Acquire) { "chatterbox" } else { "kokoro" }
+        if self
+            .clone_spec
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .is_some()
+            && !self.clone_failed.load(Ordering::Acquire)
+        {
+            "chatterbox"
+        } else {
+            "kokoro"
+        }
     }
 
     pub fn set_voice(&self, voice: &str, speed: f32) {
@@ -279,9 +343,15 @@ impl KokoroProvider {
     /// The voice and speed from `[tts]`, and a cloned voice's reference recording when
     /// one is chosen (a persona's Chatterbox voice; never with a voice override, which
     /// always means Kokoro). Choosing another clone unloads the cloned-voice worker.
-    pub fn configure(&self, tts: &crate::config::TtsCfg, clone_reference: Option<PathBuf>) -> Result<()> {
+    pub fn configure(
+        &self,
+        tts: &crate::config::TtsCfg,
+        clone_reference: Option<PathBuf>,
+    ) -> Result<()> {
         self.set_voice(&tts.voice, tts.speed);
-        let next = clone_reference.filter(|_| tts.voice_override.is_empty()).map(|reference| CloneSpec { reference });
+        let next = clone_reference
+            .filter(|_| tts.voice_override.is_empty())
+            .map(|reference| CloneSpec { reference });
         let mut spec = self.clone_spec.write().unwrap_or_else(|e| e.into_inner());
         if *spec != next {
             *self.clone_worker.lock().unwrap_or_else(|e| e.into_inner()) = None;
@@ -297,13 +367,22 @@ impl KokoroProvider {
 
     pub fn speak_cancellable(&self, text: &str, cancel: &CancellationToken) -> Result<Vec<f32>> {
         anyhow::ensure!(!cancel.is_cancelled(), "TTS cancelled");
-        let clone = self.clone_spec.read().unwrap_or_else(|e| e.into_inner()).clone();
+        let clone = self
+            .clone_spec
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
         let clone_requested = clone.is_some();
         if let Some(spec) = clone.filter(|_| !self.clone_failed.load(Ordering::Acquire)) {
             let mut worker = self.clone_worker.lock().unwrap_or_else(|e| e.into_inner());
             let result = (|| {
-                if worker.is_none() { *worker = Some(CloneWorker::start()?); }
-                worker.as_mut().unwrap().speak(&crate::speech_text::for_speech(text), &spec, cancel)
+                if worker.is_none() {
+                    *worker = Some(CloneWorker::start()?);
+                }
+                worker
+                    .as_mut()
+                    .unwrap()
+                    .speak(&crate::speech_text::for_speech(text), &spec, cancel)
             })();
             match result {
                 Ok(audio) if !cancel.is_cancelled() => return Ok(audio),
@@ -313,7 +392,9 @@ impl KokoroProvider {
                 }
                 Err(error) => {
                     *worker = None;
-                    if cancel.is_cancelled() { return Err(error); }
+                    if cancel.is_cancelled() {
+                        return Err(error);
+                    }
                     tracing::warn!(%error, "cloned voice unavailable; using Kokoro fallback");
                     self.clone_failed.store(true, Ordering::Release);
                 }
@@ -343,12 +424,19 @@ impl KokoroProvider {
         // Explicit spelling is synthesized one letter at a time. Fixed silence prevents
         // the normal sentence prosody from merging or rushing letter transitions.
         if let Some(word) = crate::speech_text::letters(text) {
-            let mut audio=Vec::new();
-            for (index,letter) in word.bytes().enumerate() {
-                if index > 0 { audio.resize(audio.len()+3_600,0.0); } // 150 ms at 24 kHz
-                let mut req=SpeakRequest::new(crate::speech_text::letter_name(letter));
-                req.voice=voice.into(); req.speed=speed; req.format=Format::Wav;
-                let speech=self.engine.speak(&req).context("synthesize spelled letter")?;
+            let mut audio = Vec::new();
+            for (index, letter) in word.bytes().enumerate() {
+                if index > 0 {
+                    audio.resize(audio.len() + 3_600, 0.0);
+                } // 150 ms at 24 kHz
+                let mut req = SpeakRequest::new(crate::speech_text::letter_name(letter));
+                req.voice = voice.into();
+                req.speed = speed;
+                req.format = Format::Wav;
+                let speech = self
+                    .engine
+                    .speak(&req)
+                    .context("synthesize spelled letter")?;
                 audio.extend(wav_to_f32(&speech.audio)?);
             }
             return Ok(audio);

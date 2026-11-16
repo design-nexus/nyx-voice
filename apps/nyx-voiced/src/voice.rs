@@ -50,7 +50,10 @@ fn unavailable(e: impl std::fmt::Display) -> Error {
 
 impl Voice {
     pub fn new(cfg: VoiceConfig) -> Shared {
-        let (state, _) = watch::channel(State { activity: "idle".into(), ..Default::default() });
+        let (state, _) = watch::channel(State {
+            activity: "idle".into(),
+            ..Default::default()
+        });
         let voice = Arc::new(Voice {
             cfg,
             state,
@@ -108,8 +111,13 @@ impl Voice {
             .await
             .map_err(unavailable)?
             .map_err(|e| unavailable(format!("the audio system isn't available: {e:#}")))?;
-        let samples = engine.take_samples().ok_or_else(|| unavailable("the microphone stream is already taken"))?;
-        let audio = Arc::new(Audio { engine, samples: tokio::sync::Mutex::new(samples) });
+        let samples = engine
+            .take_samples()
+            .ok_or_else(|| unavailable("the microphone stream is already taken"))?;
+        let audio = Arc::new(Audio {
+            engine,
+            samples: tokio::sync::Mutex::new(samples),
+        });
         *slot = Some(audio.clone());
         Ok(audio)
     }
@@ -122,8 +130,11 @@ impl Voice {
         let stt = Arc::new(Stt::new(&self.cfg.speech).await);
         if let Some(why) = stt.unavailable() {
             let why = why.to_string();
-            self.state.send_modify(|s| s.recognizer_unavailable = Some(why.clone()));
-            return Err(unavailable(format!("speech recognition isn't available: {why}")));
+            self.state
+                .send_modify(|s| s.recognizer_unavailable = Some(why.clone()));
+            return Err(unavailable(format!(
+                "speech recognition isn't available: {why}"
+            )));
         }
         self.state.send_modify(|s| s.recognizer_unavailable = None);
         *slot = Some(stt.clone());
@@ -136,7 +147,9 @@ impl Voice {
             return Ok(t.clone());
         }
         let settings = self.cfg.speech.clone();
-        let loaded = tokio::task::spawn_blocking(move || KokoroProvider::load(&settings)).await.map_err(unavailable)?;
+        let loaded = tokio::task::spawn_blocking(move || KokoroProvider::load(&settings))
+            .await
+            .map_err(unavailable)?;
         match loaded {
             Ok(t) => {
                 let t = Arc::new(t);
@@ -146,8 +159,11 @@ impl Voice {
             }
             Err(e) => {
                 let why = format!("{e:#}");
-                self.state.send_modify(|s| s.synthesizer_unavailable = Some(why.clone()));
-                Err(unavailable(format!("speech synthesis isn't available: {why}")))
+                self.state
+                    .send_modify(|s| s.synthesizer_unavailable = Some(why.clone()));
+                Err(unavailable(format!(
+                    "speech synthesis isn't available: {why}"
+                )))
             }
         }
     }
@@ -162,26 +178,50 @@ impl Voice {
                     Err(e) => tracing::warn!("Silero unavailable, using the energy gate: {e:#}"),
                 }
             }
-            return StreamingVad::new(v, slot.clone(), v.hangover_ms.max(700), v.start_confirm_frames, v.energy_threshold);
+            return StreamingVad::new(
+                v,
+                slot.clone(),
+                v.hangover_ms.max(700),
+                v.start_confirm_frames,
+                v.energy_threshold,
+            );
         }
-        StreamingVad::Energy(EnergyVad::with_confirm(v.energy_threshold, v.hangover_ms.max(700), 32, v.start_confirm_frames))
+        StreamingVad::Energy(EnergyVad::with_confirm(
+            v.energy_threshold,
+            v.hangover_ms.max(700),
+            32,
+            v.start_confirm_frames,
+        ))
     }
 
     /// Start a take; `Busy` while another runs.
     fn claim(&self, dictation: bool) -> Result<(watch::Receiver<bool>, CancellationToken), Error> {
         let mut take = self.take.lock().unwrap();
         if take.is_some() {
-            return Err(Error::new(ErrorKind::Busy, "the microphone is in use by another take"));
+            return Err(Error::new(
+                ErrorKind::Busy,
+                "the microphone is in use by another take",
+            ));
         }
         let (stop, stop_rx) = watch::channel(false);
         let cancel = CancellationToken::new();
-        *take = Some(Take { stop, dictation: dictation.then(|| tokio::sync::oneshot::channel().1) });
+        *take = Some(Take {
+            stop,
+            dictation: dictation.then(|| tokio::sync::oneshot::channel().1),
+        });
         Ok((stop_rx, cancel))
     }
 
     fn release(&self) {
         *self.take.lock().unwrap() = None;
-        self.set_activity(if self.speaking.lock().unwrap().is_some() { "speaking" } else { "idle" }, None);
+        self.set_activity(
+            if self.speaking.lock().unwrap().is_some() {
+                "speaking"
+            } else {
+                "idle"
+            },
+            None,
+        );
         self.touch();
     }
 
@@ -209,7 +249,9 @@ impl Voice {
             tokio::select! { _ = a.cancelled() => {}, _ = b.cancelled() => {} }
             j.cancel();
         });
-        let result = self.capture(mode, until, max_seconds, stop, joined.clone(), events).await;
+        let result = self
+            .capture(mode, until, max_seconds, stop, joined.clone(), events)
+            .await;
         joined.cancel();
         self.release();
         result
@@ -290,12 +332,23 @@ impl Voice {
     }
 
     /// Dictation for the keyboard: start, stop (returns what was typed) or toggle.
-    pub async fn dictate(self: &Arc<Self>, action: nyx_voice_proto::voice::DictateAction) -> Result<Option<String>, Error> {
+    pub async fn dictate(
+        self: &Arc<Self>,
+        action: nyx_voice_proto::voice::DictateAction,
+    ) -> Result<Option<String>, Error> {
         use nyx_voice_proto::voice::DictateAction::*;
-        let running = self.take.lock().unwrap().as_ref().map(|t| t.dictation.is_some());
+        let running = self
+            .take
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|t| t.dictation.is_some());
         match (action, running) {
             (Start, Some(true)) => Ok(None),
-            (Start | Toggle, Some(false)) => Err(Error::new(ErrorKind::Busy, "the microphone is in use by another take")),
+            (Start | Toggle, Some(false)) => Err(Error::new(
+                ErrorKind::Busy,
+                "the microphone is in use by another take",
+            )),
             (Start | Toggle, None) => {
                 self.start_dictation()?;
                 Ok(None)
@@ -315,11 +368,21 @@ impl Voice {
         let max = self.cfg.dictation.max_seconds;
         let pause = self.cfg.dictation.pause_media;
         tokio::spawn(async move {
-            let paused = if pause { crate::desktop::pause_media().await } else { Vec::new() };
-            let result = voice.capture(Mode::Dictation, Until::Stop, max, stop, cancel, None).await;
+            let paused = if pause {
+                crate::desktop::pause_media().await
+            } else {
+                Vec::new()
+            };
+            let result = voice
+                .capture(Mode::Dictation, Until::Stop, max, stop, cancel, None)
+                .await;
             crate::desktop::resume_media(&paused).await;
             let typed = match result {
-                Ok(text) if !text.is_empty() => crate::desktop::deliver(&voice.cfg.dictation, &text).await.map(|_| text),
+                Ok(text) if !text.is_empty() => {
+                    crate::desktop::deliver(&voice.cfg.dictation, &text)
+                        .await
+                        .map(|_| text)
+                }
                 Ok(text) => Ok(text),
                 Err(e) => Err(anyhow!("{e}")),
             };
@@ -335,7 +398,9 @@ impl Voice {
     async fn finish_dictation(&self) -> Result<String, Error> {
         let done = {
             let mut take = self.take.lock().unwrap();
-            let Some(t) = take.as_mut() else { return Ok(String::new()) };
+            let Some(t) = take.as_mut() else {
+                return Ok(String::new());
+            };
             let _ = t.stop.send(true);
             t.dictation.take()
         };
@@ -350,7 +415,13 @@ impl Voice {
     }
 
     /// Say `text` and wait until it has played, or until `cancel`.
-    pub async fn speak(&self, text: &str, voice: Option<String>, speed: Option<f32>, cancel: CancellationToken) -> Result<u64, Error> {
+    pub async fn speak(
+        &self,
+        text: &str,
+        voice: Option<String>,
+        speed: Option<f32>,
+        cancel: CancellationToken,
+    ) -> Result<u64, Error> {
         let _one = self.speak_lock.lock().await;
         self.touch();
         let tts = self.tts().await?;
@@ -401,7 +472,9 @@ impl Voice {
         if busy || self.last_used.lock().unwrap().elapsed() < IDLE {
             return;
         }
-        let had = self.stt.lock().await.take().is_some() | self.tts.lock().await.take().is_some() | self.audio.lock().await.take().is_some();
+        let had = self.stt.lock().await.take().is_some()
+            | self.tts.lock().await.take().is_some()
+            | self.audio.lock().await.take().is_some();
         self.silero.lock().unwrap().take();
         if had {
             tracing::info!("idle: speech engines unloaded");
@@ -418,5 +491,8 @@ pub enum Progress {
 
 /// The process's own folder, for the trust check.
 pub fn own_dir() -> Result<std::path::PathBuf> {
-    std::env::current_exe()?.parent().map(|p| p.to_path_buf()).context("no folder for this program")
+    std::env::current_exe()?
+        .parent()
+        .map(|p| p.to_path_buf())
+        .context("no folder for this program")
 }

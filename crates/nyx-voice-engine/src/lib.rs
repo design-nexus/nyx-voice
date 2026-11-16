@@ -13,14 +13,14 @@
 pub mod asr;
 /// The speech settings (`[audio]`, `[vad]`, `[stt]`, `[tts]`, `[barge_in]`).
 pub use nyx_voice_proto::settings as config;
-pub mod paths;
-pub mod speech_text;
-pub mod tts;
 mod checksum;
-mod engine;
 mod duck;
+mod engine;
+pub mod paths;
 mod playq;
 mod silero;
+pub mod speech_text;
+pub mod tts;
 mod vad;
 
 pub use engine::{aec_barge_threshold, record_until, record_until_vad, AudioEngine, UNTAGGED};

@@ -1,7 +1,7 @@
 //! Streaming VAD with hysteresis. Silero (ONNX) or energy/RMS, same API.
 
-use crate::silero::{Silero, SileroState};
 use crate::config::VadCfg;
+use crate::silero::{Silero, SileroState};
 use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

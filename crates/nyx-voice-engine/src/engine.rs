@@ -1,8 +1,8 @@
 //! PipeWire capture (16 kHz S16 mono) and playback (24 kHz F32 mono).
 
+use crate::config::Settings as Config;
 use crate::vad::VadGate;
 use anyhow::{Context, Result};
-use crate::config::Settings as Config;
 use pipewire as pw;
 use pw::spa::pod::Pod;
 use pw::{properties::properties, spa};
@@ -18,9 +18,16 @@ const FRAME: usize = 512;
 enum PwCmd {
     StartCapture,
     StopCapture,
-    QueuePlay { epoch: u64, generation: u64, phrase: u32, pcm: Vec<f32> },
+    QueuePlay {
+        epoch: u64,
+        generation: u64,
+        phrase: u32,
+        pcm: Vec<f32>,
+    },
     PlaybackBarrier(tokio::sync::oneshot::Sender<()>),
-    CancelPlay { epoch: u64 },
+    CancelPlay {
+        epoch: u64,
+    },
     Shutdown,
 }
 
@@ -198,7 +205,12 @@ impl AudioEngine {
     pub fn play_phrase(&self, generation: u64, phrase: u32, pcm: Vec<f32>) -> Result<()> {
         let epoch = self.play_epoch.load(Ordering::SeqCst);
         self.cmd
-            .send(PwCmd::QueuePlay { epoch, generation, phrase, pcm })
+            .send(PwCmd::QueuePlay {
+                epoch,
+                generation,
+                phrase,
+                pcm,
+            })
             .map_err(|_| anyhow::anyhow!("pipewire command channel closed"))
     }
 
@@ -213,7 +225,11 @@ impl AudioEngine {
         st.cancelled_through = st.cancelled_through.max(generation);
         st.queue.cancel_through(generation);
         st.queued.store(st.queue.queued(), Ordering::Relaxed);
-        tracing::info!(generation, us = t0.elapsed().as_micros(), "generation cancelled");
+        tracing::info!(
+            generation,
+            us = t0.elapsed().as_micros(),
+            "generation cancelled"
+        );
     }
 
     /// Ramp the playback volume (1.0 normal; lower ducks the voice while someone speaks).
@@ -251,14 +267,20 @@ impl AudioEngine {
         // QueuePlay is asynchronous: queued can still be zero until PipeWire accepts it.
         // A barrier keeps follow-up listening from starting during the question itself.
         let (ready, received) = tokio::sync::oneshot::channel();
-        self.cmd.send(PwCmd::PlaybackBarrier(ready)).map_err(|_| anyhow::anyhow!("audio output unavailable"))?;
-        tokio::time::timeout(tokio::time::Duration::from_secs(2), received).await.context("audio output did not acknowledge playback")??;
+        self.cmd
+            .send(PwCmd::PlaybackBarrier(ready))
+            .map_err(|_| anyhow::anyhow!("audio output unavailable"))?;
+        tokio::time::timeout(tokio::time::Duration::from_secs(2), received)
+            .await
+            .context("audio output did not acknowledge playback")??;
         let mut progress = tokio::time::Instant::now();
         let mut previous = self.queued.load(Ordering::Relaxed);
         while previous > 0 {
             tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
             let remaining = self.queued.load(Ordering::Relaxed);
-            if remaining != previous || self.play_state().queue.is_paused() { progress = tokio::time::Instant::now(); }
+            if remaining != previous || self.play_state().queue.is_paused() {
+                progress = tokio::time::Instant::now();
+            }
             if progress.elapsed() > tokio::time::Duration::from_secs(5) {
                 let _ = self.cancel_playback();
                 anyhow::bail!("audio output stalled");
@@ -283,14 +305,19 @@ impl Drop for AudioEngine {
 }
 
 fn source_available(name: &str) -> bool {
-    let Ok(output) = std::process::Command::new("pactl").args(["list", "short", "sources"]).output() else { return false };
-    output.status.success() && String::from_utf8_lossy(&output.stdout).lines().any(|line| line.split_whitespace().nth(1) == Some(name))
+    let Ok(output) = std::process::Command::new("pactl")
+        .args(["list", "short", "sources"])
+        .output()
+    else {
+        return false;
+    };
+    output.status.success()
+        && String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .any(|line| line.split_whitespace().nth(1) == Some(name))
 }
 
-
-fn load_assistant_echo_cancel(
-    audio: &crate::config::AudioCfg,
-) -> Result<(u32, Arc<AtomicBool>)> {
+fn load_assistant_echo_cancel(audio: &crate::config::AudioCfg) -> Result<(u32, Arc<AtomicBool>)> {
     unload_assistant_echo_cancel();
     // Keep the session sink format (typically 48 kHz stereo).
     let source_arg = format!("source_master={}", audio.source);
@@ -567,11 +594,19 @@ fn pw_thread(
     if audio.sink != "default" {
         play_props.insert("target.object", audio.sink.as_str());
     }
-    let cap_stream = pw::stream::StreamBox::new(&core, &format!("{}-capture", crate::paths::node_slug()), cap_props)
-        .context("capture stream")?;
+    let cap_stream = pw::stream::StreamBox::new(
+        &core,
+        &format!("{}-capture", crate::paths::node_slug()),
+        cap_props,
+    )
+    .context("capture stream")?;
 
-    let play_stream = pw::stream::StreamBox::new(&core, &format!("{}-playback", crate::paths::node_slug()), play_props)
-        .context("playback stream")?;
+    let play_stream = pw::stream::StreamBox::new(
+        &core,
+        &format!("{}-playback", crate::paths::node_slug()),
+        play_props,
+    )
+    .context("playback stream")?;
 
     let cap_data = capture.clone();
     let _cap_listener = cap_stream
@@ -789,7 +824,12 @@ fn pw_thread(
         PwCmd::StopCapture => {
             cap_cmd.lock().unwrap_or_else(|e| e.into_inner()).active = false;
         }
-        PwCmd::QueuePlay { epoch, generation, phrase, pcm } => {
+        PwCmd::QueuePlay {
+            epoch,
+            generation,
+            phrase,
+            pcm,
+        } => {
             let mut st = play_cmd.lock().unwrap_or_else(|e| e.into_inner());
             if epoch != st.epoch || (generation != UNTAGGED && generation <= st.cancelled_through) {
                 return;
@@ -798,7 +838,9 @@ fn pw_thread(
             let queued = st.queue.queued();
             st.queued.store(queued, Ordering::Relaxed);
         }
-        PwCmd::PlaybackBarrier(ready) => { let _ = ready.send(()); }
+        PwCmd::PlaybackBarrier(ready) => {
+            let _ = ready.send(());
+        }
         PwCmd::CancelPlay { epoch } => {
             let t0 = Instant::now();
             let mut st = play_cmd.lock().unwrap_or_else(|e| e.into_inner());

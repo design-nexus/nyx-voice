@@ -50,13 +50,25 @@ pub struct Frame {
 
 impl Frame {
     pub fn audio(utterance: u32, samples: &[i16]) -> Self {
-        Self { kind: Kind::Audio, utterance, samples: samples.to_vec() }
+        Self {
+            kind: Kind::Audio,
+            utterance,
+            samples: samples.to_vec(),
+        }
     }
     pub fn finish(utterance: u32) -> Self {
-        Self { kind: Kind::Finish, utterance, samples: Vec::new() }
+        Self {
+            kind: Kind::Finish,
+            utterance,
+            samples: Vec::new(),
+        }
     }
     pub fn abort(utterance: u32) -> Self {
-        Self { kind: Kind::Abort, utterance, samples: Vec::new() }
+        Self {
+            kind: Kind::Abort,
+            utterance,
+            samples: Vec::new(),
+        }
     }
 
     pub fn encode(&self) -> Vec<u8> {
@@ -87,17 +99,34 @@ impl Frame {
             0 => Kind::Audio,
             1 => Kind::Finish,
             2 => Kind::Abort,
-            k => return Err(io::Error::new(io::ErrorKind::InvalidData, format!("unknown frame kind {k}"))),
+            k => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("unknown frame kind {k}"),
+                ))
+            }
         };
         let utterance = u32::from_le_bytes(head[1..5].try_into().unwrap());
         let n = u32::from_le_bytes(head[5..9].try_into().unwrap());
         if n > MAX_SAMPLES {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, format!("frame of {n} samples")));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("frame of {n} samples"),
+            ));
         }
         let mut raw = vec![0u8; n as usize * 2];
         r.read_exact(&mut raw)?;
-        let samples = raw.as_chunks::<2>().0.iter().map(|b| i16::from_le_bytes([b[0], b[1]])).collect();
-        Ok(Some(Self { kind, utterance, samples }))
+        let samples = raw
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|b| i16::from_le_bytes([b[0], b[1]]))
+            .collect();
+        Ok(Some(Self {
+            kind,
+            utterance,
+            samples,
+        }))
     }
 }
 
@@ -105,12 +134,25 @@ impl Frame {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Reply {
     /// The model is loaded; frames may follow.
-    Ready { load_ms: u64 },
+    Ready {
+        load_ms: u64,
+    },
     /// The words so far; sent whenever they change.
-    Partial { u: u32, text: String, audio_ms: u64 },
+    Partial {
+        u: u32,
+        text: String,
+        audio_ms: u64,
+    },
     /// The whole utterance, after `Finish`.
-    Final { u: u32, text: String, audio_ms: u64, decode_ms: u64 },
-    Error { message: String },
+    Final {
+        u: u32,
+        text: String,
+        audio_ms: u64,
+        decode_ms: u64,
+    },
+    Error {
+        message: String,
+    },
 }
 
 #[cfg(test)]
@@ -119,7 +161,12 @@ mod tests {
 
     #[test]
     fn frames_round_trip() {
-        let frames = [Frame::audio(7, &[0, 1, -1, i16::MAX, i16::MIN]), Frame::finish(7), Frame::abort(8), Frame::audio(9, &[])];
+        let frames = [
+            Frame::audio(7, &[0, 1, -1, i16::MAX, i16::MIN]),
+            Frame::finish(7),
+            Frame::abort(8),
+            Frame::audio(9, &[]),
+        ];
         let mut buf = Vec::new();
         for f in &frames {
             f.write(&mut buf).unwrap();
@@ -146,9 +193,16 @@ mod tests {
 
     #[test]
     fn replies_are_tagged_json() {
-        let r = Reply::Partial { u: 3, text: "stop".into(), audio_ms: 640 };
+        let r = Reply::Partial {
+            u: 3,
+            text: "stop".into(),
+            audio_ms: 640,
+        };
         let s = serde_json::to_string(&r).unwrap();
-        assert_eq!(s, r#"{"kind":"partial","u":3,"text":"stop","audio_ms":640}"#);
+        assert_eq!(
+            s,
+            r#"{"kind":"partial","u":3,"text":"stop","audio_ms":640}"#
+        );
         assert_eq!(serde_json::from_str::<Reply>(&s).unwrap(), r);
     }
 }
