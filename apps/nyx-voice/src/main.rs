@@ -151,7 +151,7 @@ async fn run() -> Result<()> {
 /// What to tell someone whose dictation didn't start.
 fn dictation_problem(error: &str) -> String {
     if error.contains("models fetch asr") {
-        "The speech model isn't downloaded yet. Download it in Settings › Capture › Talk to type (about 650 MB).".into()
+        "The speech model isn't downloaded yet. Download it in Settings › Capture & Tools › Dictation (about 650 MB).".into()
     } else if error.contains("connect") || error.contains("No such file") {
         "Nyx Voice isn't running.".into()
     } else {
