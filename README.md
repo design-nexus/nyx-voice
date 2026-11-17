@@ -20,6 +20,8 @@ talks to `nyx-voiced`.
 
 ## Install
 
+On NyxOS, Voice comes with the system. On Omarchy, from a checkout:
+
 ```sh
 ./install.sh
 ```
